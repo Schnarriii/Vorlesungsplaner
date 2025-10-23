@@ -324,9 +324,16 @@
             var driveFileId = null;
             var DATA_FILE_NAME = 'semesterplaner_data.json';
             
-            // --- Google API Config ---
-            var API_KEY = "DEIN_API_KEY"; // Placeholder - Replace with your key
-            var CLIENT_ID = "DEINE_CLIENT_ID.apps.googleusercontent.com"; // Placeholder - Replace with your ID
+            // --- API Keys (Replace placeholders!) ---
+            // =================================================================================
+            // HIER DEINE GOOGLE- & GEMINI-ZUGANGSDATEN EINTRAGEN
+            // Eine Anleitung dazu findest du in der Datei 'anleitung_api_keys.md'
+            // =================================================================================
+            var GEMINI_API_KEY = "AIzaSyBQqOGOLhLFRngWcNzMiPu3OyDgvYZhNXo"; // *** NEU ***
+            var GOOGLE_API_KEY = "DEIN_GOOGLE_DRIVE_API_KEY"; // War vorher API_KEY
+            var GOOGLE_CLIENT_ID = "DEINE_GOOGLE_DRIVE_CLIENT_ID.apps.googleusercontent.com"; // War vorher CLIENT_ID
+            // =================================================================================
+            
             var DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
             var SCOPES = 'https://www.googleapis.com/auth/drive.file';
 
@@ -335,10 +342,9 @@
             };
 
             function initializeGapiClient() {
-                 // Do not proceed if keys are placeholders
-                if (API_KEY === "DEIN_API_KEY") return;
+                if (GOOGLE_API_KEY === "DEIN_GOOGLE_DRIVE_API_KEY") return;
                 gapi.client.init({
-                    apiKey: API_KEY,
+                    apiKey: GOOGLE_API_KEY,
                     discoveryDocs: [DISCOVERY_DOC],
                 }).then(function() {
                     gapiInited = true;
@@ -346,10 +352,9 @@
             }
 
             window.gisLoaded = function() {
-                 // Do not proceed if keys are placeholders
-                if (CLIENT_ID === "DEINE_CLIENT_ID.apps.googleusercontent.com") return;
+                if (GOOGLE_CLIENT_ID === "DEINE_GOOGLE_DRIVE_CLIENT_ID.apps.googleusercontent.com") return;
                 tokenClient = google.accounts.oauth2.initTokenClient({
-                    client_id: CLIENT_ID,
+                    client_id: GOOGLE_CLIENT_ID,
                     scope: SCOPES,
                     callback: '', 
                 });
@@ -368,7 +373,7 @@
                     localStorage.setItem('semesterPlanerData', JSON.stringify(appData));
                 } catch (e) {
                     console.error("Could not save data to localStorage", e);
-                    showMessage("Daten konnten nicht gespeichert werden.", true);
+                    showMessage("Lokale Daten konnten nicht gespeichert werden.", true);
                 }
             }
 
@@ -381,7 +386,7 @@
                     }
                 } catch (e) {
                     console.error("Could not load data from localStorage", e);
-                    showMessage("Gespeicherte Daten konnten nicht geladen werden.", true);
+                    showMessage("Gespeicherte lokale Daten konnten nicht geladen werden.", true);
                 }
             }
 
@@ -392,7 +397,7 @@
                 renderIcalList();
                 fetchAllIcalEvents();
                 renderCurrentView();
-                setInterval(highlightCurrentLecture, 60 * 1000);
+                setInterval(highlightCurrentLecture, 60 * 1000); // Check current lecture every minute
             }
             
             // --- All UI and core logic functions ---
@@ -414,21 +419,30 @@
             }
 
             function renderCurrentView() {
-                if (currentView === 'week') {
+                // Ensure elements exist before trying to render
+                if (currentView === 'week' && timetable) {
                     renderTimetable();
-                } else {
+                } else if (currentView === 'month' && monthGrid) {
                     renderMonthView();
                 }
             }
             
             function fetchAllIcalEvents() {
                 icalEvents = [];
+                // Check if icalSubscriptions exists and is an array
+                if (!appData.icalSubscriptions || !Array.isArray(appData.icalSubscriptions)) {
+                    appData.icalSubscriptions = [];
+                }
                 var promises = appData.icalSubscriptions.map(function(sub) {
                     return fetchAndParseICal(sub.url);
                 });
                 Promise.all(promises).then(function(results) {
+                    // Flatten results: [].concat.apply([], results) is a way to flatten arrays in ES5
                     icalEvents = [].concat.apply([], results);
-                    renderCurrentView();
+                    renderCurrentView(); // Re-render after fetching
+                }).catch(function(err){
+                    console.error("Error fetching all iCal events:", err);
+                    // Optionally show a message to the user
                 });
             }
             
@@ -447,13 +461,15 @@
                         
                         return vevents.map(function(vevent) {
                             var event = new ICAL.Event(vevent);
+                            // Basic validation for event dates
+                            if (!event.startDate || !event.endDate) return null; 
                             return {
-                                summary: event.summary,
+                                summary: event.summary || 'Unbenannter Termin',
                                 startDate: event.startDate.toJSDate(),
                                 endDate: event.endDate.toJSDate(),
                                 isAllDay: event.isAllDay,
                             };
-                        });
+                        }).filter(function(event) { return event !== null; }); // Filter out invalid events
                     } catch (parseError) {
                          console.error('Error parsing iCal data from ' + url + ':', parseError);
                          showMessage('Kalenderformat ungültig: ' + url, true);
@@ -468,7 +484,7 @@
             
             function renderIcalList() {
                 icalList.innerHTML = '';
-                if (appData.icalSubscriptions.length === 0) {
+                 if (!appData.icalSubscriptions || appData.icalSubscriptions.length === 0) {
                     icalList.innerHTML = '<p class="text-gray-500">Keine Kalender abonniert.</p>';
                     return;
                 }
@@ -479,68 +495,95 @@
                                       '<button data-id="' + sub.id + '" class="delete-ical-btn text-red-500 hover:text-red-700 font-bold p-1 ml-2">&times;</button>';
                     icalList.appendChild(div);
                 });
-                document.querySelectorAll('.delete-ical-btn').forEach(function(btn) {
-                    btn.addEventListener('click', function() {
-                        var id = this.dataset.id;
+                // Use event delegation for delete buttons for robustness
+                icalList.addEventListener('click', function(event) {
+                    if (event.target.classList.contains('delete-ical-btn')) {
+                        var id = event.target.dataset.id;
                         appData.icalSubscriptions = appData.icalSubscriptions.filter(function(s) { return s.id !== id; });
                         saveData();
-                        renderIcalList();
-                        fetchAllIcalEvents();
+                        renderIcalList(); // Re-render the list
+                        fetchAllIcalEvents(); // Refetch events
                         showMessage("Abonnement entfernt.");
-                    });
+                    }
                 });
             }
             
             function renderMonthView() {
-                monthGrid.innerHTML = '';
+                monthGrid.innerHTML = ''; // Clear previous grid
                 var year = displayedDate.getFullYear();
                 var month = displayedDate.getMonth();
                 monthYearHeader.textContent = displayedDate.toLocaleDateString('de-DE', { month: 'long', year: 'numeric' });
-                var firstDayOfMonth = new Date(year, month, 1).getDay();
+                var firstDayOfMonth = new Date(year, month, 1).getDay(); // 0=Sun, 1=Mon,...
                 var daysInMonth = new Date(year, month + 1, 0).getDate();
+                
+                // Adjust offset for Monday start (0=Sun -> 6, 1=Mon -> 0, ...)
                 var offset = (firstDayOfMonth === 0) ? 6 : firstDayOfMonth - 1; 
+
                 ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'].forEach(function(day) {
                     var header = document.createElement('div');
                     header.className = 'text-center font-bold p-2 border-b';
                     header.textContent = day;
                     monthGrid.appendChild(header);
                 });
+                
+                // Add empty cells for offset
                 for (var i = 0; i < offset; i++) {
                     monthGrid.appendChild(createDayCell(null));
                 }
+
+                // Add cells for each day of the month
                 for (var day = 1; day <= daysInMonth; day++) {
                     monthGrid.appendChild(createDayCell(new Date(year, month, day)));
+                }
+                 // Add trailing empty cells if needed
+                var totalCells = offset + daysInMonth;
+                var remainingCells = (7 - (totalCells % 7)) % 7;
+                for (var j = 0; j < remainingCells; j++) {
+                     monthGrid.appendChild(createDayCell(null));
                 }
             }
             
             function createDayCell(date) {
                 var cell = document.createElement('div');
-                cell.className = 'border p-1 flex flex-col';
+                cell.className = 'border p-1 flex flex-col min-h-[120px]'; // Ensure min height
                 if (!date) {
                     cell.classList.add('bg-gray-50');
                     return cell;
                 }
                 var dayNumber = document.createElement('span');
-                dayNumber.className = 'font-semibold mb-1';
+                dayNumber.className = 'font-semibold mb-1 self-start'; // Align day number top-left
                 dayNumber.textContent = date.getDate();
                 cell.appendChild(dayNumber);
+                
                 var today = new Date();
-                if (date.toDateString() === today.toDateString()) {
+                // Compare only year, month, and day
+                if (date.getFullYear() === today.getFullYear() &&
+                    date.getMonth() === today.getMonth() &&
+                    date.getDate() === today.getDate()) {
                     cell.classList.add('today');
                     dayNumber.classList.add('bg-blue-600', 'text-white', 'rounded-full', 'w-6', 'h-6', 'flex', 'items-center', 'justify-center');
                 }
+                
                 var eventsContainer = document.createElement('div');
                 eventsContainer.className = 'day-events flex-grow overflow-y-auto space-y-1';
-                var dayOfWeek = (date.getDay() === 0) ? 7 : date.getDay(); 
                 
-                appData.lectures.filter(function(l) {
-                    return parseInt(l.dayOfWeek) === dayOfWeek;
+                // Get day of week (adjusting Sunday from 0 to 7 for consistency if needed)
+                var dayOfWeek = date.getDay(); // 0=Sun, 1=Mon,...
+                if (dayOfWeek === 0) dayOfWeek = 7; // Treat Sunday as 7 if needed by lecture data format (1-5)
+
+                // Filter lectures scheduled for this weekday (recurring)
+                 if (!appData.lectures) appData.lectures = []; // Ensure lectures array exists
+                 appData.lectures.filter(function(l) {
+                    // Assuming dayOfWeek in lecture is 1-5 (Mon-Fri)
+                    return parseInt(l.dayOfWeek) === dayOfWeek; 
                 }).forEach(function(l) {
                     eventsContainer.appendChild(createEventElement(l.courseName, l.startTime, getCourseColor(l.courseName)));
                 });
 
+                // Filter iCal events for this specific date
+                if (!icalEvents) icalEvents = []; // Ensure icalEvents array exists
                 icalEvents.filter(function(e) {
-                    return e.startDate.toDateString() === date.toDateString();
+                     return e.startDate && e.startDate.toDateString() === date.toDateString();
                 }).forEach(function(e) {
                     var time = e.isAllDay ? 'Ganztägig' : e.startDate.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
                     eventsContainer.appendChild(createEventElement(e.summary, time, 'bg-orange-100 border border-orange-300'));
@@ -554,7 +597,9 @@
                 var eventEl = document.createElement('div');
                 eventEl.className = 'text-xs p-1 rounded-md truncate ' + colorClass;
                 eventEl.title = time + ' - ' + summary;
-                eventEl.innerHTML = '<span class="font-bold">' + time + '</span> ' + summary;
+                // Basic HTML escaping
+                var safeSummary = summary.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                eventEl.innerHTML = '<span class="font-bold">' + time + '</span> ' + safeSummary;
                 return eventEl;
             }
 
@@ -564,21 +609,44 @@
                 var startHour = start[0], startMinute = start[1];
                 var endHour = end[0], endMinute = end[1];
 
-                var startRow = (startHour - 7) * 4 + (startMinute / 15) + 2;
-                var endRow = (endHour - 7) * 4 + (endMinute / 15) + 2;
+                // Basic validation for times
+                if (isNaN(startHour) || isNaN(startMinute) || isNaN(endHour) || isNaN(endMinute)) {
+                    console.error("Invalid time format for lecture:", lecture);
+                    return document.createElement('div'); // Return empty div to avoid breaking grid
+                }
+
+                var startRow = (startHour - 7) * 4 + Math.floor(startMinute / 15) + 2; // Use Math.floor
+                var endRow = (endHour - 7) * 4 + Math.floor(endMinute / 15) + 2; // Use Math.floor
+
+                // Prevent negative rows or invalid spans
+                startRow = Math.max(2, startRow);
+                endRow = Math.max(startRow + 1, endRow); // Ensure endRow is at least one slot after startRow
+
                 var element = document.createElement('div');
                 element.className = 'lecture-item relative z-10 rounded-lg p-2 m-0.5 flex flex-col justify-start overflow-hidden cursor-pointer transition-shadow duration-200 hover:shadow-lg ' + getCourseColor(lecture.courseName);
-                element.style.gridColumn = parseInt(lecture.dayOfWeek) + 1;
+                
+                // Validate dayOfWeek before setting grid column
+                 var dayCol = parseInt(lecture.dayOfWeek);
+                 if (isNaN(dayCol) || dayCol < 1 || dayCol > 5) {
+                     console.error("Invalid dayOfWeek for lecture:", lecture);
+                     return document.createElement('div'); // Skip rendering this lecture
+                 }
+                element.style.gridColumn = dayCol + 1;
                 element.style.gridRow = startRow + ' / ' + endRow;
                 element.dataset.id = lecture.id;
                 var duration = (endHour * 60 + endMinute) - (startHour * 60 + startMinute);
                 
-                var innerHTML = '<strong class="text-sm font-bold text-gray-900 truncate">' + lecture.courseName + '</strong>';
+                // Basic HTML escaping for display
+                var safeCourseName = (lecture.courseName || '').replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                var safeLecturer = (lecture.lecturer || '').replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                var safeRoom = (lecture.room || '').replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+                var innerHTML = '<strong class="text-sm font-bold text-gray-900 truncate">' + safeCourseName + '</strong>';
                 if (duration >= 45) {
-                    innerHTML += '<p class="text-xs text-gray-700 truncate">' + (lecture.lecturer || '') + '</p>';
+                    innerHTML += '<p class="text-xs text-gray-700 truncate">' + safeLecturer + '</p>';
                 }
                 if (duration >= 60) {
-                    innerHTML += '<p class="text-xs text-gray-600 font-medium mt-auto">' + (lecture.room || '') + '</p>';
+                    innerHTML += '<p class="text-xs text-gray-600 font-medium mt-auto">' + safeRoom + '</p>';
                 }
                 element.innerHTML = innerHTML;
 
@@ -599,11 +667,11 @@
                 for (var row = 0; row < 56; row++) {
                     for (var col = 0; col < 5; col++) {
                         var cell = document.createElement('div');
-                        cell.className = 'border border-gray-100';
+                        cell.className = 'border border-gray-100'; // Cell borders
                         cell.style.gridRow = row + 2;
                         cell.style.gridColumn = col + 2;
                         if (row % 4 === 0) {
-                            cell.classList.add('border-t-gray-200');
+                            cell.classList.add('border-t-gray-200'); // Hour lines
                         }
                         timetable.appendChild(cell);
                     }
@@ -616,11 +684,21 @@
                     timeHeader.textContent = i + ':00';
                     timetable.appendChild(timeHeader);
                 }
-                appData.lectures.forEach(function(lecture) { timetable.appendChild(createLectureElement(lecture)); });
+                if (!appData.lectures) appData.lectures = []; // Ensure array exists
+                appData.lectures.forEach(function(lecture) { 
+                    // Add error handling during element creation
+                     try {
+                          var lectureEl = createLectureElement(lecture);
+                          if (lectureEl) timetable.appendChild(lectureEl);
+                     } catch(e) {
+                          console.error("Error creating lecture element:", lecture, e);
+                     }
+                });
                 highlightCurrentLecture();
             }
 
             function getCourseColor(courseName) {
+                 if (!courseName) return colors[0]; // Default color if name is missing
                 if (!courseColorMap[courseName]) {
                     courseColorMap[courseName] = colors[colorIndex % colors.length];
                     colorIndex++;
@@ -631,14 +709,20 @@
             function highlightCurrentLecture() {
                 document.querySelectorAll('.lecture-item').forEach(function(el) { el.classList.remove('ring-2', 'ring-blue-500', 'z-30'); });
                 var now = new Date();
-                var currentDay = now.getDay();
-                // Robust time formatting
+                var currentDay = now.getDay(); // 0=Sun, 1=Mon,...
                 var hours = ('0' + now.getHours()).slice(-2);
                 var minutes = ('0' + now.getMinutes()).slice(-2);
                 var currentTime = hours + ':' + minutes;
+                
+                if (!appData.lectures) appData.lectures = []; // Ensure array exists
+
                 var currentLectureItem = appData.lectures.find(function(l) {
-                    return parseInt(l.dayOfWeek) === currentDay && l.startTime <= currentTime && l.endTime > currentTime;
+                     // Ensure time comparison works correctly
+                    return parseInt(l.dayOfWeek) === currentDay && 
+                           l.startTime <= currentTime && 
+                           l.endTime > currentTime;
                 });
+                
                 if (currentLectureItem) {
                     var currentEl = document.querySelector('.lecture-item[data-id="' + currentLectureItem.id + '"]');
                     if (currentEl) currentEl.classList.add('ring-2', 'ring-blue-500', 'z-30');
@@ -650,12 +734,12 @@
                 if (lecture) {
                     modalTitle.textContent = 'Vorlesung bearbeiten';
                     document.getElementById('lectureId').value = lecture.id;
-                    document.getElementById('courseName').value = lecture.courseName;
+                    document.getElementById('courseName').value = lecture.courseName || '';
                     document.getElementById('lecturer').value = lecture.lecturer || '';
                     document.getElementById('room').value = lecture.room || '';
-                    document.getElementById('dayOfWeek').value = lecture.dayOfWeek;
-                    document.getElementById('startTime').value = lecture.startTime;
-                    document.getElementById('endTime').value = lecture.endTime;
+                    document.getElementById('dayOfWeek').value = lecture.dayOfWeek || '1';
+                    document.getElementById('startTime').value = lecture.startTime || '';
+                    document.getElementById('endTime').value = lecture.endTime || '';
                     deleteLectureBtn.classList.remove('hidden');
                 } else {
                     modalTitle.textContent = 'Neue Vorlesung hinzufügen';
@@ -670,9 +754,10 @@
             }
             
             function openDetailModal(lecture) {
+                 if (!lecture) return; // Add check
                 currentLecture = lecture;
-                detailModalTitle.textContent = lecture.courseName;
-                detailModalSubtitle.textContent = (lecture.lecturer || '') + ' | Raum: ' + (lecture.room || '');
+                detailModalTitle.textContent = lecture.courseName || 'Unbekannt';
+                detailModalSubtitle.textContent = (lecture.lecturer || 'N/A') + ' | Raum: ' + (lecture.room || 'N/A');
                 lectureDetailModal.classList.remove('hidden');
                 recordingStatus.textContent = "Startklar. Klicken Sie auf den Button, um die Aufnahme zu beginnen.";
                 resetRecordingUI();
@@ -681,19 +766,28 @@
             
             function closeDetailModal() {
                 if(isRecording && recognition) {
-                    isRecording = false; // Prevent restart on manual close
-                    recognition.stop();
+                     isRecording = false; // Prevent restart on manual close
+                     recognition.stop();
                 }
                 lectureDetailModal.classList.add('hidden');
                 currentLecture = null;
             }
             function parseGeminiResponse(text) {
-                return text.replace(/\*\*(.*?)\*\*/g, '<strong class="text-gray-900">$1</strong>').replace(/\*(.*?)\*/g, '<em>$1</em>').replace(/^- (.*$)/gm, '<li class="list-disc ml-6">$1</li>').replace(/\n/g, '<br>');
+                 if (typeof text !== 'string') return '';
+                // Basic HTML escaping before applying markdown-like formatting
+                text = text.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                return text.replace(/\*\*(.*?)\*\*/g, '<strong class="text-gray-900">$1</strong>')
+                           .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                           .replace(/^- (.*$)/gm, '<li class="list-disc ml-6">$1</li>')
+                           .replace(/\n/g, '<br>');
             }
 
             function callGeminiAPI(prompt) {
-                var geminiApiKey = "";
-                var apiUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=' + geminiApiKey;
+                 if (GEMINI_API_KEY === "DEIN_GEMINI_API_KEY") {
+                    showMessage("Bitte zuerst Gemini API Key im HTML-Code eintragen.", true);
+                    return Promise.reject("Missing Gemini API Key");
+                }
+                var apiUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=' + GEMINI_API_KEY;
                 var payload = { contents: [{ parts: [{ text: prompt }] }] };
                 return fetch(apiUrl, { 
                     method: 'POST', 
@@ -701,8 +795,17 @@
                     body: JSON.stringify(payload) 
                 }).then(function(response) {
                     if (!response.ok) {
-                        return response.text().then(function(text) { // Try to get error body
-                           throw new Error('API request failed: ' + response.status + ' ' + text);
+                         // Try to parse the error message from the response body
+                        return response.text().then(function(text) { 
+                           console.error("Gemini API Error Response:", text);
+                           var errorMsg = 'API request failed: ' + response.status;
+                           try { // Try to get more specific error from JSON
+                                var errorJson = JSON.parse(text);
+                                if (errorJson.error && errorJson.error.message) {
+                                     errorMsg += " - " + errorJson.error.message;
+                                }
+                           } catch (e) { /* Ignore parsing error */ }
+                           throw new Error(errorMsg);
                         });
                     }
                     return response.json();
@@ -710,7 +813,7 @@
                     if (result.candidates && result.candidates[0] && result.candidates[0].content && result.candidates[0].content.parts[0] && result.candidates[0].content.parts[0].text) {
                         return result.candidates[0].content.parts[0].text;
                     } else {
-                         console.error("Invalid Gemini Response:", result);
+                         console.error("Invalid Gemini Response Structure:", result);
                          throw new Error("Unerwartete Antwortstruktur von der Gemini API.");
                     }
                 });
@@ -718,7 +821,8 @@
             
             function handlePreparationClick() {
                 var now = new Date();
-                var todaysLectures = appData.lectures.filter(function(l) { return parseInt(l.dayOfWeek) === now.getDay(); })
+                var currentDay = now.getDay(); // 0=Sun, 1=Mon,...
+                var todaysLectures = appData.lectures.filter(function(l) { return parseInt(l.dayOfWeek) === currentDay; })
                                                    .sort(function(a, b) { return a.startTime.localeCompare(b.startTime); });
                 preparationModal.classList.remove('hidden');
                 prepLoader.style.display = 'flex';
@@ -742,8 +846,11 @@
                 examPrepModal.classList.remove('hidden');
                 examPrepContent.innerHTML = '';
 
-                var uniqueCourseNames = appData.lectures.map(function(l) { return l.courseName; })
-                                                      .filter(function(value, index, self) { return self.indexOf(value) === index; });
+                // Get unique course names using a simple loop for compatibility
+                 var courseNames = {};
+                 if (!appData.lectures) appData.lectures = [];
+                 appData.lectures.forEach(function(l){ courseNames[l.courseName] = true; });
+                 var uniqueCourseNames = Object.keys(courseNames);
 
                 if (uniqueCourseNames.length === 0) {
                     examPrepContent.innerHTML = '<p class="text-center text-gray-600 py-10">Füge zuerst Vorlesungen hinzu, um die Klausurvorbereitung zu nutzen.</p>';
@@ -752,13 +859,18 @@
 
                 var courseSelectionHTML = '<h3 class="text-lg font-semibold mb-4">Für welchen Kurs möchtest du dich vorbereiten?</h3><div class="flex flex-wrap gap-2">';
                 uniqueCourseNames.forEach(function(name) {
-                    courseSelectionHTML += '<button class="exam-prep-course-btn bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-2 px-4 rounded-lg transition-colors" data-course-name="' + name + '">' + name + '</button>';
+                    // Basic escaping for data attribute
+                    var safeName = name.replace(/"/g, '&quot;');
+                    courseSelectionHTML += '<button class="exam-prep-course-btn bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-2 px-4 rounded-lg transition-colors" data-course-name="' + safeName + '">' + name + '</button>';
                 });
                 courseSelectionHTML += '</div>';
                 examPrepContent.innerHTML = courseSelectionHTML;
                 
-                document.querySelectorAll('.exam-prep-course-btn').forEach(function(btn) {
-                    btn.addEventListener('click', generateExamPrepForCourse);
+                // Use event delegation for buttons inside dynamically generated content
+                examPrepContent.addEventListener('click', function(event) {
+                    if (event.target.classList.contains('exam-prep-course-btn')) {
+                        generateExamPrepForCourse(event);
+                    }
                 });
             }
             
@@ -802,8 +914,13 @@
                     showMessage("Spracherkennung wird von diesem Browser nicht unterstützt.", true);
                     return false;
                 }
+                // Check if recognition is already active to avoid errors
+                if (recognition && isRecording) {
+                     return true; // Already set up and running
+                }
+
                 recognition = new SpeechRecognition();
-                recognition.continuous = true; // Set to true for longer recordings, will restart on end
+                recognition.continuous = true; 
                 recognition.interimResults = true;
                 recognition.lang = 'de-DE';
 
@@ -811,40 +928,58 @@
                     var interimTranscript = '';
                     for (var i = event.resultIndex; i < event.results.length; ++i) {
                         if (event.results[i].isFinal) {
-                            finalTranscript += event.results[i][0].transcript + ' '; // Add space between final results
+                            finalTranscript += event.results[i][0].transcript + ' '; 
                         } else {
                             interimTranscript += event.results[i][0].transcript;
                         }
                     }
-                    liveTranscript.textContent = finalTranscript + interimTranscript;
-                    liveTranscript.scrollTop = liveTranscript.scrollHeight; // Auto-scroll
+                    if (liveTranscript) { // Check if element exists
+                        liveTranscript.textContent = finalTranscript + interimTranscript;
+                        liveTranscript.scrollTop = liveTranscript.scrollHeight; 
+                    }
                 };
                 
                 recognition.onend = function() {
-                    // If isRecording is true, it means the browser stopped it prematurely, restart it.
+                    console.log("Speech recognition ended naturally.");
                     if (isRecording) {
-                        console.log("Speech recognition ended, restarting...");
-                        recognition.start();
+                        console.log("Restarting recognition...");
+                         // Add a small delay before restarting, helps in some browsers
+                        setTimeout(function() { 
+                            if(isRecording && recognition) { // Double check flag
+                                try { recognition.start(); } catch(e){ console.error("Error restarting recognition:", e);}
+                            }
+                        }, 250); 
                     }
                 };
 
                 recognition.onstart = function() {
                     console.log("Speech recognition started.");
-                    recordingStatus.textContent = "Aufnahme läuft... Sprechen Sie jetzt.";
+                    if(recordingStatus) recordingStatus.textContent = "Aufnahme läuft... Sprechen Sie jetzt.";
                 };
 
                 recognition.onerror = function(event) {
-                    console.error("Speech recognition error", event.error, event.message);
-                     // More specific error handling
+                    console.error("Speech recognition error:", event.error, event.message);
+                    var errorMessage = 'Fehler bei der Aufnahme: ' + event.error;
                     if (event.error === 'network') {
-                        showMessage('Netzwerkfehler bei der Spracherkennung. Prüfe die Internetverbindung.', true);
+                        errorMessage = 'Netzwerkfehler bei der Spracherkennung. Prüfe die Internetverbindung.';
                     } else if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-                         showMessage('Zugriff auf Mikrofon verweigert. Bitte Berechtigung erteilen.', true);
-                    } else if (event.error !== 'no-speech') { // Ignore 'no-speech'
-                        showMessage('Fehler bei der Aufnahme: ' + event.error, true);
+                         errorMessage = 'Zugriff auf Mikrofon verweigert. Bitte Berechtigung erteilen.';
+                    } else if (event.error === 'audio-capture') {
+                         errorMessage = 'Mikrofonproblem. Wird es von einer anderen App verwendet?';
+                    } else if (event.error === 'aborted') {
+                         console.log("Recognition aborted, likely intentional stop.");
+                         // Don't show error message for manual stops
+                         isRecording = false; // Ensure flag is false
+                         resetRecordingUI();
+                         return; // Stop further processing for abort
+                    } else if (event.error === 'no-speech') {
+                         console.log("No speech detected, continuing...");
+                         // No user message needed, just let it restart or be stopped manually
+                         return; 
                     }
-                     // No matter the error, if we intended to record, try resetting UI
-                     if (isRecording) {
+                    
+                    showMessage(errorMessage, true);
+                     if (isRecording) { // Only reset if it was supposed to be running
                         isRecording = false;
                         resetRecordingUI();
                      }
@@ -857,10 +992,12 @@
                 
                 if (setupSpeechRecognition()) {
                     finalTranscript = ''; // Reset transcript
-                    liveTranscript.textContent = '';
-                    liveTranscript.classList.remove('hidden');
-                    startRecordingBtn.classList.add('hidden');
-                    stopRecordingBtn.classList.remove('hidden');
+                    if (liveTranscript) {
+                         liveTranscript.textContent = '';
+                         liveTranscript.classList.remove('hidden');
+                    }
+                    if (startRecordingBtn) startRecordingBtn.classList.add('hidden');
+                    if (stopRecordingBtn) stopRecordingBtn.classList.remove('hidden');
                     isRecording = true;
                     try {
                         recognition.start();
@@ -873,7 +1010,7 @@
                 }
             }
              
-            // Renamed from handleStopRecording to avoid confusion with the button handler
+            // This function is triggered ONLY by the STOP button click now
             function stopRecognitionAndProcess() {
                  if (isRecording) {
                     isRecording = false; // Set flag first to prevent restart in onend
@@ -886,45 +1023,45 @@
 
             function processRecordedTranscript() {
                 resetRecordingUI();
-                liveTranscript.classList.add('hidden');
+                 if (liveTranscript) liveTranscript.classList.add('hidden');
                 
                 var trimmedTranscript = finalTranscript.trim();
                 console.log("Final Transcript Length:", trimmedTranscript.length);
-                console.log("Final Transcript:", trimmedTranscript);
+                // console.log("Final Transcript:", trimmedTranscript); // Optional: Log for debugging
 
 
-                if (trimmedTranscript.length < 20) { // Increased threshold slightly
-                    showMessage("Aufnahme zu kurz für eine sinnvolle Bearbeitung.", true);
-                    recordingStatus.textContent = "Aufnahme war zu kurz. Bitte versuchen Sie es erneut.";
+                if (trimmedTranscript.length < 20) { 
+                    showMessage("Aufnahme zu kurz für eine sinnvolle Bearbeitung (" + trimmedTranscript.length + " Zeichen). Mindestens 20 benötigt.", true);
+                    if (recordingStatus) recordingStatus.textContent = "Aufnahme war zu kurz. Bitte versuchen Sie es erneut.";
                     finalTranscript = ''; // Clear for next attempt
                     return;
                 }
                 
-                recordingStatus.innerHTML = '<div class="flex items-center gap-2"><div class="loader w-5 h-5 border-2 border-t-blue-500"></div> Transkript wird korrigiert...</div>';
+                if (recordingStatus) recordingStatus.innerHTML = '<div class="flex items-center gap-2"><div class="loader w-5 h-5 border-2 border-t-blue-500"></div> Transkript wird korrigiert...</div>';
                 
-                var correctionPrompt = 'Das folgende ist ein automatisch generiertes Transkript einer Vorlesung. Es enthält wahrscheinlich Fehler, Füllwörter und unvollständige Sätze aufgrund von schlechter Audioqualität. Bitte korrigiere den Text, um ihn grammatikalisch korrekt und lesbar zu machen. Entferne Füllwörter, vervollständige Sätze basierend auf dem Kontext, aber erfinde keine neuen fachlichen Inhalte. Gib nur den korrigierten Text zurück.\n\nTranskript:\n"' + trimmedTranscript + '"';
+                var correctionPrompt = 'Das folgende ist ein automatisch generiertes Transkript einer Vorlesung. Es enthält wahrscheinlich Fehler, Füllwörter und unvollständige Sätze aufgrund von schlechter Audioqualität. Bitte korrigiere den Text, um ihn grammatikalisch korrekt und lesbar zu machen. Entferne Füllwörter (wie "äh", "ähm"), vervollständige Sätze basierend auf dem Kontext, aber erfinde keine neuen fachlichen Inhalte. Gib nur den korrigierten Text zurück.\n\nTranskript:\n"' + trimmedTranscript + '"';
 
                 callGeminiAPI(correctionPrompt).then(function(correctedTranscript) {
-                    recordingStatus.innerHTML = '<div class="flex items-center gap-2"><div class="loader w-5 h-5 border-2 border-t-blue-500"></div> Zusammenfassung wird erstellt...</div>';
+                    if (recordingStatus) recordingStatus.innerHTML = '<div class="flex items-center gap-2"><div class="loader w-5 h-5 border-2 border-t-blue-500"></div> Zusammenfassung wird erstellt...</div>';
                     var summaryPrompt = 'Du bist ein Experte für akademische Zusammenfassungen. Analysiere das folgende, korrigierte Vorlesungstranskript und extrahiere die wichtigsten Kernaussagen, Definitionen und Fakten. Präsentiere sie in einer klaren, strukturierten und leicht verständlichen Form auf Deutsch. Transkript: "' + correctedTranscript + '"';
                     return callGeminiAPI(summaryPrompt);
                 }).then(function(summary) {
                     saveSummary(currentLecture.id, trimmedTranscript, summary); // Save original transcript for reference
-                    recordingStatus.textContent = "Zusammenfassung erfolgreich erstellt und gespeichert.";
+                    if (recordingStatus) recordingStatus.textContent = "Zusammenfassung erfolgreich erstellt und gespeichert.";
                     finalTranscript = ''; // Clear after successful processing
                 }).catch(function(error) {
                     showMessage("Fehler bei der KI-Bearbeitung: " + error.message, true);
-                    recordingStatus.textContent = "Bearbeitung konnte nicht erstellt werden.";
+                    if (recordingStatus) recordingStatus.textContent = "Bearbeitung konnte nicht erstellt werden.";
                     finalTranscript = ''; // Clear even if error occurred
                 });
             }
 
             function resetRecordingUI() {
-                stopRecordingBtn.classList.add('hidden');
-                startRecordingBtn.classList.remove('hidden');
-                liveTranscript.classList.add('hidden');
+                if (stopRecordingBtn) stopRecordingBtn.classList.add('hidden');
+                if (startRecordingBtn) startRecordingBtn.classList.remove('hidden');
+                if (liveTranscript) liveTranscript.classList.add('hidden');
                 // Ensure the status text is reset if no processing is happening
-                if (!recordingStatus.innerHTML.includes('loader')) {
+                if (recordingStatus && !recordingStatus.innerHTML.includes('loader')) {
                     recordingStatus.textContent = "Startklar.";
                 }
             }
@@ -933,13 +1070,27 @@
                 if (!appData.summaries[lectureId]) {
                     appData.summaries[lectureId] = [];
                 }
-                appData.summaries[lectureId] = appData.summaries[lectureId].filter(function(s) { return s.date !== date; });
-                appData.summaries[lectureId].push({ date: date, transcript: transcript, summary: summary, createdAt: new Date().toISOString() });
+                // Check if summary for this date already exists and replace it
+                var existingIndex = -1;
+                for(var i = 0; i < appData.summaries[lectureId].length; i++){
+                    if(appData.summaries[lectureId][i].date === date){
+                        existingIndex = i;
+                        break;
+                    }
+                }
+                var newSummary = { date: date, transcript: transcript, summary: summary, createdAt: new Date().toISOString() };
+                if (existingIndex > -1) {
+                    appData.summaries[lectureId][existingIndex] = newSummary;
+                } else {
+                     appData.summaries[lectureId].push(newSummary);
+                }
+                
                 saveData();
                 showMessage("Zusammenfassung gespeichert!");
-                loadPastSummaries(lectureId);
+                loadPastSummaries(lectureId); // Reload summaries in the UI
             }
             function loadPastSummaries(lectureId) {
+                if (!pastSummariesContainer) return; // Add check
                 pastSummariesContainer.innerHTML = '';
                 var summaries = appData.summaries[lectureId] || [];
 
@@ -948,39 +1099,53 @@
                     return;
                 }
                 
-                var sortedSummaries = summaries.sort(function(a,b) { return new Date(b.createdAt) - new Date(a.createdAt); });
+                // Sort summaries by createdAt date, newest first
+                var sortedSummaries = summaries.sort(function(a,b) { 
+                    // Handle potential missing createdAt for older data
+                    var dateA = a.createdAt ? new Date(a.createdAt) : new Date(a.date);
+                    var dateB = b.createdAt ? new Date(b.createdAt) : new Date(b.date);
+                    return dateB - dateA; 
+                });
 
                 sortedSummaries.forEach(function(summaryData) {
                     var detailElement = document.createElement('details');
                     detailElement.className = 'bg-gray-50 p-3 rounded-lg';
-                    detailElement.innerHTML = '<summary class="font-semibold cursor-pointer">Zusammenfassung vom ' + new Date(summaryData.date).toLocaleDateString('de-DE') + '</summary><div class="prose max-w-none mt-2 pt-2 border-t text-sm">' + parseGeminiResponse(summaryData.summary) + '</div>';
+                    // Display date from 'date' field
+                    var displayDate = new Date(summaryData.date).toLocaleDateString('de-DE');
+                    var safeSummary = parseGeminiResponse(summaryData.summary || ''); // Ensure summary exists
+                    detailElement.innerHTML = '<summary class="font-semibold cursor-pointer">Zusammenfassung vom ' + displayDate + '</summary><div class="prose max-w-none mt-2 pt-2 border-t text-sm">' + safeSummary + '</div>';
                     pastSummariesContainer.appendChild(detailElement);
                 });
             }
 
             // --- Google Drive Functions ---
             function handleAuthClick() {
-                if (API_KEY === "DEIN_API_KEY" || CLIENT_ID === "DEINE_CLIENT_ID.apps.googleusercontent.com") {
-                    showMessage("Bitte zuerst API Key und Client ID im HTML-Code eintragen (siehe Anleitung).", true);
+                if (GOOGLE_API_KEY === "DEIN_GOOGLE_DRIVE_API_KEY" || GOOGLE_CLIENT_ID === "DEINE_GOOGLE_DRIVE_CLIENT_ID.apps.googleusercontent.com") {
+                    showMessage("Bitte zuerst Google API Key und Client ID im HTML-Code eintragen (siehe Anleitung).", true);
                     return;
                 }
                 if (!gapiInited || !gisInited) {
-                    showMessage("Google API noch nicht geladen. Bitte kurz warten.", true);
+                    showMessage("Google API noch nicht geladen. Bitte kurz warten und erneut versuchen.", true);
                     return;
                 }
 
                 tokenClient.callback = function(resp) {
                     if (resp.error !== undefined) {
                          console.error("Google Auth Error:", resp);
-                         showMessage("Google Drive Verbindung fehlgeschlagen.", true);
+                         showMessage("Google Drive Verbindung fehlgeschlagen: " + resp.error, true);
+                         updateSigninStatus(false); // Ensure UI reflects failure
                          throw (resp);
                     }
                     updateSigninStatus(true);
                 };
 
-                if (gapi.client.getToken() === null) {
+                // Check if already signed in - gapi.client might not be fully ready yet
+                if (gapi.client && gapi.client.getToken && gapi.client.getToken() === null) {
+                    // Prompt the user to select a Google Account and ask for consent to share their data
+                    // when establishing a new session.
                     tokenClient.requestAccessToken({prompt: 'consent'});
                 } else {
+                    // Skip display of account chooser and consent dialog for an existing session.
                     tokenClient.requestAccessToken({prompt: ''});
                 }
             }
@@ -991,10 +1156,12 @@
                     google.accounts.oauth2.revoke(token.access_token);
                     gapi.client.setToken('');
                     updateSigninStatus(false);
+                    driveFileId = null; // Reset file ID on signout
                 }
             }
             
             function updateSigninStatus(isSignedIn) {
+                 if (!driveAuthContainer || !driveActionContainer || !driveStatus) return; // Add checks
                 if (isSignedIn) {
                     driveAuthContainer.classList.add('hidden');
                     driveActionContainer.classList.remove('hidden');
@@ -1007,28 +1174,33 @@
             }
 
             function findOrCreateFile() {
-                 if (!gapi.client.getToken()) {
+                 if (!gapi.client || !gapi.client.getToken || !gapi.client.getToken()) {
                     showMessage("Nicht mit Google Drive verbunden.", true);
                     return Promise.reject("Not signed in");
                  }
+                 if (driveFileId) { // If we already know the ID, return it immediately
+                     return Promise.resolve(driveFileId);
+                 }
+                // Search for the file
                 return gapi.client.drive.files.list({
                     'q': "name='" + DATA_FILE_NAME + "' and mimeType='application/json' and trashed=false",
-                    'spaces': 'drive',
+                    'spaces': 'drive', // Search only Drive, not shared spaces etc.
                     'fields': 'files(id, name)'
                 }).then(function(response) {
                     var files = response.result.files;
                     if (files && files.length > 0) {
-                        driveFileId = files[0].id;
+                        driveFileId = files[0].id; // Store the found ID
                         return files[0].id;
                     } else {
+                        // File not found, create it
                         return gapi.client.drive.files.create({
                             resource: {
                                 'name': DATA_FILE_NAME,
                                 'mimeType': 'application/json'
                             },
-                            fields: 'id'
+                            fields: 'id' // Only request the ID of the new file
                         }).then(function(response) {
-                            driveFileId = response.result.id;
+                            driveFileId = response.result.id; // Store the new ID
                             return response.result.id;
                         });
                     }
@@ -1036,12 +1208,16 @@
             }
 
             function handleLoadFromDrive() {
-                if (!gapi.client.getToken()) return showMessage("Nicht mit Google Drive verbunden.", true);
-                if (!confirm("Möchtest du deine aktuellen lokalen Daten wirklich mit den Daten aus Google Drive überschreiben?")) {
+                if (!gapi.client || !gapi.client.getToken || !gapi.client.getToken()) return showMessage("Nicht mit Google Drive verbunden.", true);
+                if (!confirm("Möchtest du deine aktuellen lokalen Daten wirklich mit den Daten aus Google Drive überschreiben? Ungespeicherte lokale Änderungen gehen verloren.")) {
                     return;
                 }
                 showMessage("Lade Daten aus Drive...");
+                driveLoadBtn.disabled = true; // Prevent double clicks
+                driveSaveBtn.disabled = true;
+
                 findOrCreateFile().then(function(fileId) {
+                    if (!fileId) throw new Error("Konnte Datei-ID nicht finden oder erstellen.");
                     return gapi.client.drive.files.get({
                         'fileId': fileId,
                         'alt': 'media'
@@ -1049,76 +1225,94 @@
                 }).then(function(response) {
                     var data = response.body;
                     if (data && data.length > 0) {
-                         // Validate data structure before loading
                          try {
                             var parsedData = JSON.parse(data);
-                            if (typeof parsedData === 'object' && parsedData !== null) {
-                                loadData(parsedData);
+                             if (typeof parsedData === 'object' && parsedData !== null) {
+                                // Basic validation of structure before overwriting
+                                if (Array.isArray(parsedData.lectures) && typeof parsedData.summaries === 'object' && Array.isArray(parsedData.icalSubscriptions)) {
+                                    appData = parsedData; // Overwrite local data
+                                     showMessage("Daten erfolgreich aus Google Drive geladen!", false);
+                                } else {
+                                     throw new Error("Datenformat in Drive ungültig.");
+                                }
                             } else {
-                                throw new Error("Invalid data format in Drive file.");
+                                throw new Error("Datenformat in Drive ungültig.");
                             }
                          } catch (e) {
                              console.error("Error parsing data from Drive:", e);
                              throw new Error("Datenformat in Drive ungültig.");
                          }
                     } else {
-                        // If file is empty, just keep local data but confirm load conceptually happened
-                        loadData({}); // Essentially clears local data if desired, or handle differently
+                         // File exists but is empty, treat as loading an empty dataset
+                         appData = { lectures: [], icalSubscriptions: [], summaries: {} };
+                         showMessage("Leere Datei aus Drive geladen.", false);
                     }
-                    saveData(); // Save the potentially updated data locally
+                    saveData(); // Save the newly loaded (or empty) data locally
                     renderCurrentView();
                     renderIcalList();
-                    fetchAllIcalEvents();
-                    showMessage("Daten erfolgreich aus Google Drive geladen!", false);
+                    fetchAllIcalEvents(); // Refetch iCal based on potentially new subscriptions
                 }).catch(function(err) {
                     console.error("Error loading file from drive", err);
-                    // Check specifically for 404 which can happen if findOrCreateFile failed previously
-                    // or if the file genuinely doesn't exist AND creation failed.
+                     var userMessage = "Fehler beim Laden aus Drive: ";
                     if (err.status === 404 || (err.result && err.result.error && err.result.error.code === 404)) {
-                        showMessage("Speicherdatei in Drive nicht gefunden. Speichere zuerst.", false);
+                        userMessage = "Speicherdatei in Drive nicht gefunden. Speichere zuerst, um sie zu erstellen.";
+                    } else if (err.message) {
+                         userMessage += err.message;
                     } else {
-                        showMessage("Fehler beim Laden aus Drive: " + (err.message || "Unbekannter Fehler"), true);
+                         userMessage += "Unbekannter Fehler.";
                     }
+                     showMessage(userMessage, true);
+                }).finally(function() {
+                    // Re-enable buttons regardless of success/failure
+                     driveLoadBtn.disabled = false; 
+                     driveSaveBtn.disabled = false;
                 });
             }
 
             function handleSaveToDrive() {
-                 if (!gapi.client.getToken()) return showMessage("Nicht mit Google Drive verbunden.", true);
+                 if (!gapi.client || !gapi.client.getToken || !gapi.client.getToken()) return showMessage("Nicht mit Google Drive verbunden.", true);
                  showMessage("Speichere Daten in Drive...");
+                 driveLoadBtn.disabled = true; // Prevent clicks during save
+                 driveSaveBtn.disabled = true;
+
                  var content = JSON.stringify(appData);
-                 var boundary = '-------314159265358979323846';
-                 var delimiter = "\r\n--" + boundary + "\r\n";
-                 var close_delim = "\r\n--" + boundary + "--";
-
-                 var metadata = {
-                    'name': DATA_FILE_NAME,
-                    'mimeType': 'application/json'
-                 };
-
-                 var multipartRequestBody =
-                    delimiter +
-                    'Content-Type: application/json\r\n\r\n' +
-                    JSON.stringify(metadata) +
-                    delimiter +
-                    'Content-Type: application/json\r\n\r\n' +
-                    content +
-                    close_delim;
+                 // Using Blob for simpler upload with gapi.client.request and media upload
+                 var blob = new Blob([content], { type: 'application/json' });
 
                 findOrCreateFile().then(function(fileId) {
+                    if (!fileId) throw new Error("Konnte Datei-ID nicht finden oder erstellen.");
+                    
+                     // Use media upload protocol
                      return gapi.client.request({
-                        'path': '/upload/drive/v3/files/' + fileId,
-                        'method': 'PATCH',
-                        'params': {'uploadType': 'multipart'},
-                        'headers': {
-                          'Content-Type': 'multipart/related; boundary="' + boundary + '"'
+                        path: '/upload/drive/v3/files/' + fileId,
+                        method: 'PATCH',
+                        params: {
+                             uploadType: 'media' // Use 'media' for simple content update
                         },
-                        'body': multipartRequestBody
+                        headers: {
+                            'Content-Type': 'application/json' 
+                        },
+                        body: blob // Send the Blob directly
                     });
+
                 }).then(function(response) {
+                    console.log("Save successful:", response);
                     showMessage("Daten erfolgreich in Google Drive gespeichert!", false);
                 }).catch(function(err) {
                     console.error("Error saving to drive", err);
-                    showMessage("Fehler beim Speichern in Drive: " + (err.message || "Unbekannter Fehler"), true);
+                     var userMessage = "Fehler beim Speichern in Drive: ";
+                     if (err.message) {
+                         userMessage += err.message;
+                     } else if (err.result && err.result.error && err.result.error.message) {
+                          userMessage += err.result.error.message;
+                     } else {
+                         userMessage += "Unbekannter Fehler.";
+                     }
+                    showMessage(userMessage, true);
+                }).finally(function() {
+                    // Re-enable buttons regardless of success/failure
+                     driveLoadBtn.disabled = false; 
+                     driveSaveBtn.disabled = false;
                 });
             }
 
@@ -1137,6 +1331,7 @@
                 addIcalBtn.addEventListener('click', function() {
                     var url = icalUrlInput.value.trim();
                     if (!url) return showMessage("Bitte geben Sie eine URL ein.", true);
+                    // Simple URL validation
                     if (url.indexOf('http') !== 0 || url.indexOf('.') === -1) {
                          return showMessage("Dies ist keine gültige URL.", true);
                     }
@@ -1168,7 +1363,7 @@
                     openModal(currentLecture);
                 });
                 startRecordingBtn.addEventListener('click', handleStartRecording);
-                stopRecordingBtn.addEventListener('click', stopRecognitionAndProcess); // Use the correct stop function
+                stopRecordingBtn.addEventListener('click', stopRecognitionAndProcess); 
                 
                 lectureForm.addEventListener('submit', function(e) {
                     e.preventDefault();
@@ -1191,8 +1386,13 @@
                             }
                         }
                         if (index !== -1) {
-                            // Use Object.assign for broader compatibility
-                            appData.lectures[index] = Object.assign({}, appData.lectures[index], lectureData);
+                            // Use Object.assign for broader compatibility if needed, though direct assignment works here
+                             appData.lectures[index].courseName = lectureData.courseName;
+                             appData.lectures[index].lecturer = lectureData.lecturer;
+                             appData.lectures[index].room = lectureData.room;
+                             appData.lectures[index].dayOfWeek = lectureData.dayOfWeek;
+                             appData.lectures[index].startTime = lectureData.startTime;
+                             appData.lectures[index].endTime = lectureData.endTime;
                             showMessage("Vorlesung aktualisiert!");
                         }
                     } else { // Adding new
@@ -1207,8 +1407,11 @@
                 deleteLectureBtn.addEventListener('click', function() {
                     var id = document.getElementById('lectureId').value;
                     if(id) {
+                         if (!confirm("Möchtest du diese Vorlesung und alle zugehörigen Zusammenfassungen wirklich löschen?")) {
+                             return;
+                         }
                         appData.lectures = appData.lectures.filter(function(l) { return l.id !== id; });
-                        delete appData.summaries[id];
+                        delete appData.summaries[id]; // Also delete associated summaries
                         saveData();
                         renderCurrentView();
                         showMessage("Vorlesung gelöscht!");
