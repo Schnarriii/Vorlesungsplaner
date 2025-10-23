@@ -1,0 +1,1179 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vorlesungsplaner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        body::-webkit-scrollbar {
+            display: none;
+        }
+        .timetable-grid {
+            display: grid;
+            grid-template-columns: 60px repeat(5, 1fr);
+            grid-template-rows: 40px repeat(56, 15px);
+            gap: 2px;
+        }
+        .month-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            grid-auto-rows: minmax(120px, auto);
+        }
+        .time-header, .day-header {
+            position: sticky;
+            top: 0;
+            z-index: 20;
+        }
+        .time-header {
+            top: 40px;
+            left: 0;
+            z-index: 10;
+        }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 4px solid #3498db;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+         .pulse {
+            animation: pulse-animation 2s infinite;
+        }
+        @keyframes pulse-animation {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+        .today {
+            background-color: #e0f2fe;
+        }
+        .day-events::-webkit-scrollbar {
+            width: 4px;
+        }
+        .day-events::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 2px;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+    <div id="app" class="p-4 md:p-8 max-w-7xl mx-auto">
+        <header class="flex flex-col sm:flex-row justify-between sm:items-center mb-6 gap-4">
+            <div>
+                <h1 class="text-3xl font-bold text-gray-900">Dein Semesterplan</h1>
+                <p class="text-gray-500 mt-1">Verwalte hier deine Vorlesungen und Termine.</p>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">
+                <div class="flex items-center bg-gray-200 rounded-lg p-1">
+                    <button id="weekViewBtn" class="px-3 py-1 text-sm font-semibold rounded-md transition-colors bg-white text-blue-600 shadow">Woche</button>
+                    <button id="monthViewBtn" class="px-3 py-1 text-sm font-semibold rounded-md transition-colors text-gray-600">Monat</button>
+                </div>
+                <button id="examPrepBtn" class="bg-green-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 transition duration-200">
+                    ✨ Klausur-Vorbereitung
+                </button>
+                 <button id="prepareTodayBtn" class="bg-purple-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 transition duration-200">
+                    ✨ Heutige Vorbereitung
+                </button>
+                <button id="addLectureBtn" class="bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200">
+                    + Neue Vorlesung
+                </button>
+            </div>
+        </header>
+
+        <div id="calendarContainer">
+            <div id="weekViewContainer" class="bg-white rounded-xl shadow-lg overflow-auto">
+                 <div id="timetable" class="timetable-grid relative"></div>
+            </div>
+            <div id="monthViewContainer" class="hidden">
+                 <div class="flex justify-between items-center mb-4 bg-white p-3 rounded-xl shadow-lg">
+                    <button id="prevMonthBtn" class="p-2 rounded-full hover:bg-gray-200">&lt;</button>
+                    <h2 id="monthYearHeader" class="text-xl font-bold"></h2>
+                    <button id="nextMonthBtn" class="p-2 rounded-full hover:bg-gray-200">&gt;</button>
+                </div>
+                <div id="monthGrid" class="month-grid bg-white rounded-xl shadow-lg border border-gray-200"></div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mt-8">
+            <div id="icalSection" class="p-6 bg-white rounded-xl shadow-lg">
+                <h2 class="text-xl font-bold mb-4">Kalender-Abonnements (iCal)</h2>
+                <div class="flex flex-col sm:flex-row gap-2 mb-4">
+                    <input type="url" id="icalUrlInput" placeholder="https://beispiel.com/kalender.ics" class="flex-grow border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                    <button id="addIcalBtn" class="bg-gray-600 text-white font-semibold py-2 px-5 rounded-lg shadow-md hover:bg-gray-700 transition duration-200">Abonnieren</button>
+                </div>
+                <div id="icalList" class="space-y-2"></div>
+            </div>
+            <div id="driveSyncSection" class="p-6 bg-white rounded-xl shadow-lg">
+                 <h2 class="text-xl font-bold mb-4">Google Drive Sync</h2>
+                 <p id="drive-status" class="text-sm text-gray-500 mb-4">Verbinde dein Google-Konto, um Daten zu laden und zu sichern.</p>
+                 <div id="drive-auth-container">
+                    <button id="drive-auth-btn" class="w-full bg-blue-600 text-white font-semibold py-2 px-5 rounded-lg shadow-md hover:bg-blue-700 transition duration-200">Mit Google Drive verbinden</button>
+                 </div>
+                 <div id="drive-action-container" class="hidden space-y-2">
+                     <button id="drive-load-btn" class="w-full bg-green-600 text-white font-semibold py-2 px-5 rounded-lg shadow-md hover:bg-green-700 transition duration-200">Daten aus Drive Laden</button>
+                     <button id="drive-save-btn" class="w-full bg-gray-700 text-white font-semibold py-2 px-5 rounded-lg shadow-md hover:bg-gray-800 transition duration-200">Daten in Drive Speichern</button>
+                     <button id="drive-signout-btn" class="w-full mt-4 text-sm text-red-500 hover:underline">Verbindung trennen</button>
+                 </div>
+            </div>
+        </div>
+
+        <footer class="text-center text-gray-400 mt-8 text-sm">
+             <p>Erweitert mit Gemini.</p>
+        </footer>
+    </div>
+
+    <!-- Modals -->
+    <div id="lectureModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] hidden">
+        <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md m-4 transform transition-all overflow-y-auto max-h-screen">
+            <div class="flex justify-between items-center mb-6">
+                <h2 id="modalTitle" class="text-2xl font-bold">Neue Vorlesung hinzufügen</h2>
+                <button id="closeModalBtn" class="text-gray-400 hover:text-gray-600 text-3xl">&times;</button>
+            </div>
+            <form id="lectureForm">
+                <input type="hidden" id="lectureId">
+                <div class="space-y-4">
+                    <div>
+                        <label for="courseName" class="block text-sm font-medium text-gray-700">Vorlesungsname</label>
+                        <input type="text" id="courseName" required class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+                    <div>
+                        <label for="lecturer" class="block text-sm font-medium text-gray-700">Dozent/in</label>
+                        <input type="text" id="lecturer" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+                    <div>
+                        <label for="room" class="block text-sm font-medium text-gray-700">Raum</label>
+                        <input type="text" id="room" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+                    <div>
+                        <label for="dayOfWeek" class="block text-sm font-medium text-gray-700">Wochentag</label>
+                        <select id="dayOfWeek" required class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                            <option value="1">Montag</option>
+                            <option value="2">Dienstag</option>
+                            <option value="3">Mittwoch</option>
+                            <option value="4">Donnerstag</option>
+                            <option value="5">Freitag</option>
+                        </select>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label for="startTime" class="block text-sm font-medium text-gray-700">Startzeit</label>
+                            <input type="time" id="startTime" step="900" required class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label for="endTime" class="block text-sm font-medium text-gray-700">Endzeit</label>
+                            <input type="time" id="endTime" step="900" required class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                    </div>
+                </div>
+                <div class="flex justify-end items-center mt-8 space-x-4">
+                     <button id="deleteLectureBtn" type="button" class="bg-red-600 text-white font-semibold py-2 px-5 rounded-lg shadow-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-75 transition duration-200 hidden">Löschen</button>
+                    <button type="submit" class="bg-blue-600 text-white font-semibold py-2 px-5 rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 transition duration-200">Speichern</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <div id="preparationModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-2xl m-4 transform transition-all max-h-[90vh] flex flex-col">
+            <div class="flex justify-between items-center mb-4 pb-4 border-b">
+                <h2 class="text-2xl font-bold text-gray-900">✨ Vorbereitung für Heute</h2>
+                <button id="closePrepModalBtn" class="text-gray-400 hover:text-gray-600 text-3xl">&times;</button>
+            </div>
+            <div id="preparationContent" class="overflow-y-auto space-y-6">
+                <div id="prepLoader" class="flex justify-center items-center py-16">
+                    <div class="loader"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="lectureDetailModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-2xl m-4 transform transition-all max-h-[90vh] flex flex-col">
+            <div class="flex justify-between items-center pb-4 border-b">
+                <div>
+                    <h2 id="detailModalTitle" class="text-2xl font-bold text-gray-900">Vorlesungsdetails</h2>
+                    <p id="detailModalSubtitle" class="text-gray-500"></p>
+                </div>
+                <button id="closeDetailModalBtn" class="text-gray-400 hover:text-gray-600 text-3xl">&times;</button>
+            </div>
+            <div class="overflow-y-auto mt-6 flex-grow">
+                 <div id="recordingSection" class="p-4 bg-gray-50 rounded-lg">
+                    <h3 class="font-bold text-lg mb-2">Aufnahme & Zusammenfassung</h3>
+                    <div id="recordingStatus" class="text-gray-600 mb-4"></div>
+                    <button id="startRecordingBtn" class="w-full bg-green-600 text-white font-semibold py-2 px-5 rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 transition duration-200">
+                        🎤 Aufnahme & Zusammenfassung starten
+                    </button>
+                    <button id="stopRecordingBtn" class="w-full bg-red-600 text-white font-semibold py-2 px-5 rounded-lg shadow-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 hidden pulse">
+                        🛑 Aufnahme stoppen & Zusammenfassung erstellen
+                    </button>
+                    <div id="liveTranscript" class="mt-4 p-2 bg-white rounded h-24 overflow-y-auto text-sm text-gray-500 border hidden"></div>
+                 </div>
+                 <div id="summarySection" class="mt-6">
+                      <h3 class="font-bold text-lg mb-2">Gespeicherte Zusammenfassungen</h3>
+                      <div id="pastSummariesContainer" class="space-y-2">
+                           <p class="text-gray-500">Keine Zusammenfassungen für diese Vorlesung gefunden.</p>
+                      </div>
+                 </div>
+            </div>
+             <div class="pt-4 mt-4 border-t flex justify-end">
+                 <button id="editLectureBtn" class="bg-gray-200 text-gray-800 font-semibold py-2 px-5 rounded-lg hover:bg-gray-300 transition duration-200">Bearbeiten</button>
+             </div>
+        </div>
+    </div>
+    
+    <div id="examPrepModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-2xl m-4 transform transition-all max-h-[90vh] flex flex-col">
+            <div class="flex justify-between items-center mb-4 pb-4 border-b">
+                <h2 class="text-2xl font-bold text-gray-900">✨ Klausur-Vorbereitung</h2>
+                <button id="closeExamPrepModalBtn" class="text-gray-400 hover:text-gray-600 text-3xl">&times;</button>
+            </div>
+            <div id="examPrepContent" class="overflow-y-auto">
+                <!-- Content is generated dynamically -->
+            </div>
+        </div>
+    </div>
+
+    <div id="messageBox" class="hidden fixed top-5 right-5 bg-green-500 text-white py-2 px-4 rounded-lg shadow-lg z-[100]">
+        <p id="messageText"></p>
+    </div>
+
+    <!-- The ical.js library is loaded synchronously before the main app module. -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ical.js/2.0.0/ical.min.js"></script>
+    <script async defer src="https://apis.google.com/js/api.js" onload="gapiLoaded"></script>
+    <script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded"></script>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // --- DOM Elements ---
+            var timetable = document.getElementById('timetable');
+            var lectureModal = document.getElementById('lectureModal');
+            var weekViewBtn = document.getElementById('weekViewBtn');
+            var monthViewBtn = document.getElementById('monthViewBtn');
+            var weekViewContainer = document.getElementById('weekViewContainer');
+            var monthViewContainer = document.getElementById('monthViewContainer');
+            var monthGrid = document.getElementById('monthGrid');
+            var monthYearHeader = document.getElementById('monthYearHeader');
+            var prevMonthBtn = document.getElementById('prevMonthBtn');
+            var nextMonthBtn = document.getElementById('nextMonthBtn');
+            var addIcalBtn = document.getElementById('addIcalBtn');
+            var icalUrlInput = document.getElementById('icalUrlInput');
+            var icalList = document.getElementById('icalList');
+            var addLectureBtn = document.getElementById('addLectureBtn');
+            var closeModalBtn = document.getElementById('closeModalBtn');
+            var lectureForm = document.getElementById('lectureForm');
+            var modalTitle = document.getElementById('modalTitle');
+            var deleteLectureBtn = document.getElementById('deleteLectureBtn');
+            var messageBox = document.getElementById('messageBox');
+            var messageText = document.getElementById('messageText');
+            var prepareTodayBtn = document.getElementById('prepareTodayBtn');
+            var preparationModal = document.getElementById('preparationModal');
+            var closePrepModalBtn = document.getElementById('closePrepModalBtn');
+            var preparationContent = document.getElementById('preparationContent');
+            var prepLoader = document.getElementById('prepLoader');
+            var lectureDetailModal = document.getElementById('lectureDetailModal');
+            var closeDetailModalBtn = document.getElementById('closeDetailModalBtn');
+            var detailModalTitle = document.getElementById('detailModalTitle');
+            var detailModalSubtitle = document.getElementById('detailModalSubtitle');
+            var editLectureBtn = document.getElementById('editLectureBtn');
+            var startRecordingBtn = document.getElementById('startRecordingBtn');
+            var stopRecordingBtn = document.getElementById('stopRecordingBtn');
+            var recordingStatus = document.getElementById('recordingStatus');
+            var liveTranscript = document.getElementById('liveTranscript');
+            var pastSummariesContainer = document.getElementById('pastSummariesContainer');
+            var examPrepBtn = document.getElementById('examPrepBtn');
+            var examPrepModal = document.getElementById('examPrepModal');
+            var closeExamPrepModalBtn = document.getElementById('closeExamPrepModalBtn');
+            var examPrepContent = document.getElementById('examPrepContent');
+            var driveStatus = document.getElementById('drive-status');
+            var driveAuthContainer = document.getElementById('drive-auth-container');
+            var driveActionContainer = document.getElementById('drive-action-container');
+            var driveAuthBtn = document.getElementById('drive-auth-btn');
+            var driveLoadBtn = document.getElementById('drive-load-btn');
+            var driveSaveBtn = document.getElementById('drive-save-btn');
+            var driveSignoutBtn = document.getElementById('drive-signout-btn');
+            
+            // --- App State ---
+            var appData = { lectures: [], icalSubscriptions: [], summaries: {} };
+            var icalEvents = [];
+            var currentLecture = null;
+            var currentView = 'week';
+            var displayedDate = new Date();
+            var colors = ['bg-blue-100', 'bg-green-100', 'bg-yellow-100', 'bg-purple-100', 'bg-pink-100', 'bg-indigo-100', 'bg-teal-100'];
+            var courseColorMap = {};
+            var colorIndex = 0;
+            var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            var recognition;
+            var isRecording = false;
+            var finalTranscript = '';
+            var tokenClient;
+            var gapiInited = false;
+            var gisInited = false;
+            var driveFileId = null;
+            var DATA_FILE_NAME = 'semesterplaner_data.json';
+            
+            // --- Google API Config ---
+            var API_KEY = "DEIN_API_KEY";
+            var CLIENT_ID = "DEINE_CLIENT_ID.apps.googleusercontent.com";
+            var DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
+            var SCOPES = 'https://www.googleapis.com/auth/drive.file';
+
+            window.gapiLoaded = function() {
+                gapi.load('client', initializeGapiClient);
+            };
+
+            function initializeGapiClient() {
+                gapi.client.init({
+                    apiKey: API_KEY,
+                    discoveryDocs: [DISCOVERY_DOC],
+                }).then(function() {
+                    gapiInited = true;
+                });
+            }
+
+            window.gisLoaded = function() {
+                tokenClient = google.accounts.oauth2.initTokenClient({
+                    client_id: CLIENT_ID,
+                    scope: SCOPES,
+                    callback: '', 
+                });
+                gisInited = true;
+            };
+
+            function generateUUID() {
+                return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                    var r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+                    return v.toString(16);
+                });
+            }
+
+            function saveData() {
+                try {
+                    localStorage.setItem('semesterPlanerData', JSON.stringify(appData));
+                } catch (e) {
+                    console.error("Could not save data to localStorage", e);
+                    showMessage("Daten konnten nicht gespeichert werden.", true);
+                }
+            }
+
+            function loadData() {
+                try {
+                    var data = localStorage.getItem('semesterPlanerData');
+                    if (data) {
+                        appData = JSON.parse(data);
+                        if (!appData.summaries) appData.summaries = {};
+                    }
+                } catch (e) {
+                    console.error("Could not load data from localStorage", e);
+                    showMessage("Gespeicherte Daten konnten nicht geladen werden.", true);
+                }
+            }
+
+            function main() {
+                loadData();
+                setupEventListeners();
+                switchView('week');
+                renderIcalList();
+                fetchAllIcalEvents();
+                renderCurrentView();
+                setInterval(highlightCurrentLecture, 60 * 1000);
+            }
+            
+            // --- All UI and core logic functions ---
+            
+            function switchView(view) {
+                currentView = view;
+                if (view === 'week') {
+                    weekViewContainer.classList.remove('hidden');
+                    monthViewContainer.classList.add('hidden');
+                    weekViewBtn.classList.add('bg-white', 'text-blue-600', 'shadow');
+                    monthViewBtn.classList.remove('bg-white', 'text-blue-600', 'shadow');
+                } else {
+                    weekViewContainer.classList.add('hidden');
+                    monthViewContainer.classList.remove('hidden');
+                    weekViewBtn.classList.remove('bg-white', 'text-blue-600', 'shadow');
+                    monthViewBtn.classList.add('bg-white', 'text-blue-600', 'shadow');
+                }
+                renderCurrentView();
+            }
+
+            function renderCurrentView() {
+                if (currentView === 'week') {
+                    renderTimetable();
+                } else {
+                    renderMonthView();
+                }
+            }
+            
+            function fetchAllIcalEvents() {
+                icalEvents = [];
+                var promises = appData.icalSubscriptions.map(function(sub) {
+                    return fetchAndParseICal(sub.url);
+                });
+                Promise.all(promises).then(function(results) {
+                    icalEvents = [].concat.apply([], results);
+                    renderCurrentView();
+                });
+            }
+            
+            function fetchAndParseICal(url) {
+                var proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url);
+                return fetch(proxyUrl).then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('HTTP-Fehler: ' + response.status);
+                    }
+                    return response.text();
+                }).then(function(icsData) {
+                    var jcalData = ICAL.parse(icsData);
+                    var comp = new ICAL.Component(jcalData);
+                    var vevents = comp.getAllSubcomponents('vevent');
+                    
+                    return vevents.map(function(vevent) {
+                        var event = new ICAL.Event(vevent);
+                        return {
+                            summary: event.summary,
+                            startDate: event.startDate.toJSDate(),
+                            endDate: event.endDate.toJSDate(),
+                            isAllDay: event.isAllDay,
+                        };
+                    });
+                }).catch(function(error) {
+                    console.error('Error parsing iCal from ' + url + ':', error);
+                    showMessage('Kalender konnte nicht geladen werden. (' + error.message + ')', true);
+                    return [];
+                });
+            }
+            
+            function renderIcalList() {
+                icalList.innerHTML = '';
+                if (appData.icalSubscriptions.length === 0) {
+                    icalList.innerHTML = '<p class="text-gray-500">Keine Kalender abonniert.</p>';
+                    return;
+                }
+                appData.icalSubscriptions.forEach(function(sub) {
+                    var div = document.createElement('div');
+                    div.className = 'flex justify-between items-center bg-gray-100 p-2 rounded-md';
+                    div.innerHTML = '<p class="text-sm truncate" title="' + sub.url + '">' + sub.url + '</p>' +
+                                      '<button data-id="' + sub.id + '" class="delete-ical-btn text-red-500 hover:text-red-700 font-bold p-1 ml-2">&times;</button>';
+                    icalList.appendChild(div);
+                });
+                document.querySelectorAll('.delete-ical-btn').forEach(function(btn) {
+                    btn.addEventListener('click', function() {
+                        var id = this.dataset.id;
+                        appData.icalSubscriptions = appData.icalSubscriptions.filter(function(s) { return s.id !== id; });
+                        saveData();
+                        renderIcalList();
+                        fetchAllIcalEvents();
+                        showMessage("Abonnement entfernt.");
+                    });
+                });
+            }
+            
+            function renderMonthView() {
+                monthGrid.innerHTML = '';
+                var year = displayedDate.getFullYear();
+                var month = displayedDate.getMonth();
+                monthYearHeader.textContent = displayedDate.toLocaleDateString('de-DE', { month: 'long', year: 'numeric' });
+                var firstDayOfMonth = new Date(year, month, 1).getDay();
+                var daysInMonth = new Date(year, month + 1, 0).getDate();
+                var offset = (firstDayOfMonth === 0) ? 6 : firstDayOfMonth - 1; 
+                ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'].forEach(function(day) {
+                    var header = document.createElement('div');
+                    header.className = 'text-center font-bold p-2 border-b';
+                    header.textContent = day;
+                    monthGrid.appendChild(header);
+                });
+                for (var i = 0; i < offset; i++) {
+                    monthGrid.appendChild(createDayCell(null));
+                }
+                for (var day = 1; day <= daysInMonth; day++) {
+                    monthGrid.appendChild(createDayCell(new Date(year, month, day)));
+                }
+            }
+            
+            function createDayCell(date) {
+                var cell = document.createElement('div');
+                cell.className = 'border p-1 flex flex-col';
+                if (!date) {
+                    cell.classList.add('bg-gray-50');
+                    return cell;
+                }
+                var dayNumber = document.createElement('span');
+                dayNumber.className = 'font-semibold mb-1';
+                dayNumber.textContent = date.getDate();
+                cell.appendChild(dayNumber);
+                var today = new Date();
+                if (date.toDateString() === today.toDateString()) {
+                    cell.classList.add('today');
+                    dayNumber.classList.add('bg-blue-600', 'text-white', 'rounded-full', 'w-6', 'h-6', 'flex', 'items-center', 'justify-center');
+                }
+                var eventsContainer = document.createElement('div');
+                eventsContainer.className = 'day-events flex-grow overflow-y-auto space-y-1';
+                var dayOfWeek = (date.getDay() === 0) ? 7 : date.getDay(); 
+                
+                appData.lectures.filter(function(l) {
+                    return parseInt(l.dayOfWeek) === dayOfWeek;
+                }).forEach(function(l) {
+                    eventsContainer.appendChild(createEventElement(l.courseName, l.startTime, getCourseColor(l.courseName)));
+                });
+
+                icalEvents.filter(function(e) {
+                    return e.startDate.toDateString() === date.toDateString();
+                }).forEach(function(e) {
+                    var time = e.isAllDay ? 'Ganztägig' : e.startDate.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+                    eventsContainer.appendChild(createEventElement(e.summary, time, 'bg-orange-100 border border-orange-300'));
+                });
+
+                cell.appendChild(eventsContainer);
+                return cell;
+            }
+            
+            function createEventElement(summary, time, colorClass) {
+                var eventEl = document.createElement('div');
+                eventEl.className = 'text-xs p-1 rounded-md truncate ' + colorClass;
+                eventEl.title = time + ' - ' + summary;
+                eventEl.innerHTML = '<span class="font-bold">' + time + '</span> ' + summary;
+                return eventEl;
+            }
+
+            function createLectureElement(lecture) {
+                var start = lecture.startTime.split(':').map(Number);
+                var end = lecture.endTime.split(':').map(Number);
+                var startHour = start[0], startMinute = start[1];
+                var endHour = end[0], endMinute = end[1];
+
+                var startRow = (startHour - 7) * 4 + (startMinute / 15) + 2;
+                var endRow = (endHour - 7) * 4 + (endMinute / 15) + 2;
+                var element = document.createElement('div');
+                element.className = 'lecture-item relative z-10 rounded-lg p-2 m-0.5 flex flex-col justify-start overflow-hidden cursor-pointer transition-shadow duration-200 hover:shadow-lg ' + getCourseColor(lecture.courseName);
+                element.style.gridColumn = parseInt(lecture.dayOfWeek) + 1;
+                element.style.gridRow = startRow + ' / ' + endRow;
+                element.dataset.id = lecture.id;
+                var duration = (endHour * 60 + endMinute) - (startHour * 60 + startMinute);
+                
+                var innerHTML = '<strong class="text-sm font-bold text-gray-900 truncate">' + lecture.courseName + '</strong>';
+                if (duration >= 45) {
+                    innerHTML += '<p class="text-xs text-gray-700 truncate">' + lecture.lecturer + '</p>';
+                }
+                if (duration >= 60) {
+                    innerHTML += '<p class="text-xs text-gray-600 font-medium mt-auto">' + lecture.room + '</p>';
+                }
+                element.innerHTML = innerHTML;
+
+                element.addEventListener('click', function() { openDetailModal(lecture); });
+                return element;
+            }
+
+            function renderTimetable() {
+                timetable.innerHTML = ''; 
+                var days = ['', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag'];
+                days.forEach(function(day, index) {
+                    var dayHeader = document.createElement('div');
+                    dayHeader.className = 'day-header p-2 text-center font-semibold bg-white border-b-2 border-gray-200 ' + (day ? '' : 'sticky left-0');
+                    if (index > 0) dayHeader.style.gridColumn = index + 1;
+                    dayHeader.textContent = day;
+                    timetable.appendChild(dayHeader);
+                });
+                for (var row = 0; row < 56; row++) {
+                    for (var col = 0; col < 5; col++) {
+                        var cell = document.createElement('div');
+                        cell.className = 'border border-gray-100';
+                        cell.style.gridRow = row + 2;
+                        cell.style.gridColumn = col + 2;
+                        if (row % 4 === 0) {
+                            cell.classList.add('border-t-gray-200');
+                        }
+                        timetable.appendChild(cell);
+                    }
+                }
+                for (var i = 7; i <= 20; i++) {
+                    var timeHeader = document.createElement('div');
+                    timeHeader.className = 'time-header text-xs text-right pr-2 pt-0.5 text-gray-400 bg-white border-r-2 border-gray-200 sticky';
+                    var startRowForHour = (i - 7) * 4 + 2;
+                    timeHeader.style.gridRow = startRowForHour + ' / span 4';
+                    timeHeader.textContent = i + ':00';
+                    timetable.appendChild(timeHeader);
+                }
+                appData.lectures.forEach(function(lecture) { timetable.appendChild(createLectureElement(lecture)); });
+                highlightCurrentLecture();
+            }
+
+            function getCourseColor(courseName) {
+                if (!courseColorMap[courseName]) {
+                    courseColorMap[courseName] = colors[colorIndex % colors.length];
+                    colorIndex++;
+                }
+                return courseColorMap[courseName];
+            }
+            
+            function highlightCurrentLecture() {
+                document.querySelectorAll('.lecture-item').forEach(function(el) { el.classList.remove('ring-2', 'ring-blue-500', 'z-30'); });
+                var now = new Date();
+                var currentDay = now.getDay();
+                var hours = ('0' + now.getHours()).slice(-2);
+                var minutes = ('0' + now.getMinutes()).slice(-2);
+                var currentTime = hours + ':' + minutes;
+                var currentLectureItem = appData.lectures.find(function(l) {
+                    return parseInt(l.dayOfWeek) === currentDay && l.startTime <= currentTime && l.endTime > currentTime;
+                });
+                if (currentLectureItem) {
+                    var currentEl = document.querySelector('.lecture-item[data-id="' + currentLectureItem.id + '"]');
+                    if (currentEl) currentEl.classList.add('ring-2', 'ring-blue-500', 'z-30');
+                }
+            }
+            function openModal(lecture) {
+                lecture = lecture || null;
+                lectureForm.reset();
+                if (lecture) {
+                    modalTitle.textContent = 'Vorlesung bearbeiten';
+                    document.getElementById('lectureId').value = lecture.id;
+                    document.getElementById('courseName').value = lecture.courseName;
+                    document.getElementById('lecturer').value = lecture.lecturer;
+                    document.getElementById('room').value = lecture.room;
+                    document.getElementById('dayOfWeek').value = lecture.dayOfWeek;
+                    document.getElementById('startTime').value = lecture.startTime;
+                    document.getElementById('endTime').value = lecture.endTime;
+                    deleteLectureBtn.classList.remove('hidden');
+                } else {
+                    modalTitle.textContent = 'Neue Vorlesung hinzufügen';
+                    document.getElementById('lectureId').value = '';
+                    deleteLectureBtn.classList.add('hidden');
+                }
+                lectureModal.classList.remove('hidden');
+            }
+
+            function closeModal() {
+                lectureModal.classList.add('hidden');
+            }
+            
+            function openDetailModal(lecture) {
+                currentLecture = lecture;
+                detailModalTitle.textContent = lecture.courseName;
+                detailModalSubtitle.textContent = (lecture.lecturer || '') + ' | Raum: ' + (lecture.room || '');
+                lectureDetailModal.classList.remove('hidden');
+                recordingStatus.textContent = "Startklar. Klicken Sie auf den Button, um die Aufnahme zu beginnen.";
+                resetRecordingUI();
+                loadPastSummaries(lecture.id);
+            }
+            
+            function closeDetailModal() {
+                if(isRecording && recognition) {
+                    isRecording = false; // Prevent restart on manual close
+                    recognition.stop();
+                }
+                lectureDetailModal.classList.add('hidden');
+                currentLecture = null;
+            }
+            function parseGeminiResponse(text) {
+                return text.replace(/\*\*(.*?)\*\*/g, '<strong class="text-gray-900">$1</strong>').replace(/\*(.*?)\*/g, '<em>$1</em>').replace(/^- (.*$)/gm, '<li class="list-disc ml-6">$1</li>').replace(/\n/g, '<br>');
+            }
+
+            function callGeminiAPI(prompt) {
+                var geminiApiKey = "";
+                var apiUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=' + geminiApiKey;
+                var payload = { contents: [{ parts: [{ text: prompt }] }] };
+                return fetch(apiUrl, { 
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' }, 
+                    body: JSON.stringify(payload) 
+                }).then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('API request failed with status ' + response.status);
+                    }
+                    return response.json();
+                }).then(function(result) {
+                    if (result.candidates && result.candidates[0] && result.candidates[0].content && result.candidates[0].content.parts[0] && result.candidates[0].content.parts[0].text) {
+                        return result.candidates[0].content.parts[0].text;
+                    } else {
+                        throw new Error("Invalid response structure from API");
+                    }
+                });
+            }
+            
+            function handlePreparationClick() {
+                var now = new Date();
+                var todaysLectures = appData.lectures.filter(function(l) { return parseInt(l.dayOfWeek) === now.getDay(); })
+                                                   .sort(function(a, b) { return a.startTime.localeCompare(b.startTime); });
+                preparationModal.classList.remove('hidden');
+                prepLoader.style.display = 'flex';
+                preparationContent.innerHTML = '';
+                preparationContent.appendChild(prepLoader);
+                if (todaysLectures.length === 0) {
+                     preparationContent.innerHTML = '<p class="text-center text-gray-600 py-10">Für heute sind keine Vorlesungen geplant. Genieße den freien Tag!</p>';
+                     return;
+                }
+                var courseNames = todaysLectures.map(function(l) { return l.courseName; }).join(', ');
+                var prompt = 'Du bist ein hilfreicher Studienassistent. Erstelle einen Vorbereitungsplan für einen Universitätsstudenten für die folgenden Kurse, die heute anstehen: ' + courseNames + '. Gib für jeden Kurs: 1. **Wahrscheinliches Kernthema**, 2. **Frage zum Nachdenken** und 3. **Wichtige Schlüsselbegriffe** (2-3). Formatiere die Antwort klar mit Markdown.';
+                callGeminiAPI(prompt).then(function(responseText) {
+                    preparationContent.innerHTML = '<div class="prose max-w-none">' + parseGeminiResponse(responseText) + '</div>';
+                }).catch(function(error) {
+                    console.error("Failed to get preparation plan:", error);
+                    preparationContent.innerHTML = '<p class="text-center text-red-600 py-10">Leider konnte der Vorbereitungsplan nicht erstellt werden.</p>';
+                });
+            }
+
+            function handleExamPrepClick() {
+                examPrepModal.classList.remove('hidden');
+                examPrepContent.innerHTML = '';
+
+                var uniqueCourseNames = appData.lectures.map(function(l) { return l.courseName; })
+                                                      .filter(function(value, index, self) { return self.indexOf(value) === index; });
+
+                if (uniqueCourseNames.length === 0) {
+                    examPrepContent.innerHTML = '<p class="text-center text-gray-600 py-10">Füge zuerst Vorlesungen hinzu, um die Klausurvorbereitung zu nutzen.</p>';
+                    return;
+                }
+
+                var courseSelectionHTML = '<h3 class="text-lg font-semibold mb-4">Für welchen Kurs möchtest du dich vorbereiten?</h3><div class="flex flex-wrap gap-2">';
+                uniqueCourseNames.forEach(function(name) {
+                    courseSelectionHTML += '<button class="exam-prep-course-btn bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-2 px-4 rounded-lg transition-colors" data-course-name="' + name + '">' + name + '</button>';
+                });
+                courseSelectionHTML += '</div>';
+                examPrepContent.innerHTML = courseSelectionHTML;
+                
+                document.querySelectorAll('.exam-prep-course-btn').forEach(function(btn) {
+                    btn.addEventListener('click', generateExamPrepForCourse);
+                });
+            }
+            
+            function generateExamPrepForCourse(event) {
+                var courseName = event.target.dataset.courseName;
+                examPrepContent.innerHTML = '<div class="flex justify-center items-center py-16"><div class="loader"></div></div>';
+
+                var lecturesForCourse = appData.lectures.filter(function(l) { return l.courseName === courseName; });
+                var allSummaries = [];
+
+                lecturesForCourse.forEach(function(lecture) {
+                    if (appData.summaries[lecture.id]) {
+                        var summariesForLecture = appData.summaries[lecture.id].map(function(s) { return s.summary; });
+                        allSummaries = allSummaries.concat(summariesForLecture);
+                    }
+                });
+
+                if (allSummaries.length === 0) {
+                    examPrepContent.innerHTML = 
+                        '<div class="text-center py-10">' +
+                            '<p class="text-gray-600">Für den Kurs "' + courseName + '" wurden noch keine Zusammenfassungen gefunden.</p>' +
+                            '<p class="text-sm text-gray-500 mt-2">Nutze die "Aufnahme & Zusammenfassung"-Funktion in den Vorlesungsdetails, um Inhalte zu sammeln.</p>' +
+                        '</div>';
+                    return;
+                }
+
+                var combinedSummaries = allSummaries.join("\n\n---\n\n");
+                var prompt = "Du bist ein erfahrener Tutor. Basierend auf den folgenden Zusammenfassungen aus einer Vorlesungsreihe zum Thema '" + courseName + "', erstelle bitte eine umfassende Klausurvorbereitung auf Deutsch. Diese sollte beinhalten:\n1.  **Zentrale Kernthemen:** Eine Liste der 3-5 wichtigsten übergeordneten Themen, die in den Zusammenfassungen behandelt wurden.\n2.  **Mögliche Klausurfragen:** 3-4 anspruchsvolle, offene Fragen, die das Verständnis der Kernthemen testen.\n3.  **Wichtige Definitionen:** Eine Liste von Schlüsselbegriffen, die man für die Klausur definieren können sollte.\nFormatiere die Antwort klar und strukturiert mit Markdown.\n\nHier sind die gesammelten Zusammenfassungen:\n" + combinedSummaries;
+
+                callGeminiAPI(prompt).then(function(responseText) {
+                    examPrepContent.innerHTML = '<div class="prose max-w-none">' + parseGeminiResponse(responseText) + '</div>';
+                }).catch(function(error) {
+                    console.error("Failed to get exam prep:", error);
+                    examPrepContent.innerHTML = '<p class="text-center text-red-600 py-10">Leider konnte die Klausurvorbereitung nicht erstellt werden.</p>';
+                });
+            }
+
+
+            function setupSpeechRecognition() {
+                if (!SpeechRecognition) {
+                    showMessage("Spracherkennung wird von diesem Browser nicht unterstützt.", true);
+                    return false;
+                }
+                recognition = new SpeechRecognition();
+                recognition.continuous = true;
+                recognition.interimResults = true;
+                recognition.lang = 'de-DE';
+
+                recognition.onresult = function(event) {
+                    var interimTranscript = '';
+                    for (var i = event.resultIndex; i < event.results.length; ++i) {
+                        if (event.results[i].isFinal) {
+                            finalTranscript += event.results[i][0].transcript + ' ';
+                        } else {
+                            interimTranscript += event.results[i][0].transcript;
+                        }
+                    }
+                    liveTranscript.textContent = finalTranscript + interimTranscript;
+                    liveTranscript.scrollTop = liveTranscript.scrollHeight;
+                };
+                
+                recognition.onend = function() {
+                    if (isRecording) {
+                        recognition.start();
+                    }
+                };
+
+                recognition.onstart = function() {
+                    recordingStatus.textContent = "Aufnahme läuft... Sprechen Sie jetzt.";
+                };
+
+                recognition.onerror = function(event) {
+                    console.error("Speech recognition error", event.error);
+                    if (event.error !== 'no-speech') {
+                        showMessage('Fehler bei der Aufnahme: ' + event.error, true);
+                    }
+                };
+                return true;
+            }
+
+            function handleStartRecording() {
+                if (isRecording) return;
+                
+                if (setupSpeechRecognition()) {
+                    finalTranscript = '';
+                    liveTranscript.textContent = '';
+                    liveTranscript.classList.remove('hidden');
+                    startRecordingBtn.classList.add('hidden');
+                    stopRecordingBtn.classList.remove('hidden');
+                    isRecording = true;
+                    recognition.start();
+                }
+            }
+
+            function handleStopRecording() {
+                if (isRecording) {
+                    isRecording = false; 
+                    recognition.stop();
+                    processRecordedTranscript();
+                }
+            }
+            
+            function processRecordedTranscript() {
+                resetRecordingUI();
+                liveTranscript.classList.add('hidden');
+
+                if (finalTranscript.trim().length < 20) {
+                    showMessage("Aufnahme zu kurz für eine sinnvolle Bearbeitung.", true);
+                    recordingStatus.textContent = "Aufnahme war zu kurz. Bitte versuchen Sie es erneut.";
+                    return;
+                }
+                
+                recordingStatus.innerHTML = '<div class="flex items-center gap-2"><div class="loader w-5 h-5 border-2 border-t-blue-500"></div> Transkript wird korrigiert...</div>';
+                
+                var correctionPrompt = 'Das folgende ist ein automatisch generiertes Transkript einer Vorlesung. Es enthält wahrscheinlich Fehler, Füllwörter und unvollständige Sätze aufgrund von schlechter Audioqualität. Bitte korrigiere den Text, um ihn grammatikalisch korrekt und lesbar zu machen. Entferne Füllwörter, vervollständige Sätze basierend auf dem Kontext, aber erfinde keine neuen fachlichen Inhalte. Gib nur den korrigierten Text zurück.\n\nTranskript:\n"' + finalTranscript + '"';
+
+                callGeminiAPI(correctionPrompt).then(function(correctedTranscript) {
+                    recordingStatus.innerHTML = '<div class="flex items-center gap-2"><div class="loader w-5 h-5 border-2 border-t-blue-500"></div> Zusammenfassung wird erstellt...</div>';
+                    var summaryPrompt = 'Du bist ein Experte für akademische Zusammenfassungen. Analysiere das folgende, korrigierte Vorlesungstranskript und extrahiere die wichtigsten Kernaussagen, Definitionen und Fakten. Präsentiere sie in einer klaren, strukturierten und leicht verständlichen Form auf Deutsch. Transkript: "' + correctedTranscript + '"';
+                    return callGeminiAPI(summaryPrompt);
+                }).then(function(summary) {
+                    saveSummary(currentLecture.id, finalTranscript, summary); // Save original transcript for reference
+                    recordingStatus.textContent = "Zusammenfassung erfolgreich erstellt und gespeichert.";
+                }).catch(function(error) {
+                    showMessage("Fehler bei der KI-Bearbeitung.", true);
+                    recordingStatus.textContent = "Bearbeitung konnte nicht erstellt werden.";
+                });
+            }
+
+            function resetRecordingUI() {
+                stopRecordingBtn.classList.add('hidden');
+                startRecordingBtn.classList.remove('hidden');
+                liveTranscript.classList.add('hidden');
+            }
+            function saveSummary(lectureId, transcript, summary) {
+                var date = new Date().toISOString().split('T')[0]; 
+                if (!appData.summaries[lectureId]) {
+                    appData.summaries[lectureId] = [];
+                }
+                appData.summaries[lectureId] = appData.summaries[lectureId].filter(function(s) { return s.date !== date; });
+                appData.summaries[lectureId].push({ date: date, transcript: transcript, summary: summary, createdAt: new Date().toISOString() });
+                saveData();
+                showMessage("Zusammenfassung gespeichert!");
+                loadPastSummaries(lectureId);
+            }
+            function loadPastSummaries(lectureId) {
+                pastSummariesContainer.innerHTML = '';
+                var summaries = appData.summaries[lectureId] || [];
+
+                if (summaries.length === 0) {
+                    pastSummariesContainer.innerHTML = '<p class="text-gray-500">Keine Zusammenfassungen für diese Vorlesung gefunden.</p>';
+                    return;
+                }
+                
+                var sortedSummaries = summaries.sort(function(a,b) { return new Date(b.createdAt) - new Date(a.createdAt); });
+
+                sortedSummaries.forEach(function(summaryData) {
+                    var detailElement = document.createElement('details');
+                    detailElement.className = 'bg-gray-50 p-3 rounded-lg';
+                    detailElement.innerHTML = '<summary class="font-semibold cursor-pointer">Zusammenfassung vom ' + new Date(summaryData.date).toLocaleDateString('de-DE') + '</summary><div class="prose max-w-none mt-2 pt-2 border-t text-sm">' + parseGeminiResponse(summaryData.summary) + '</div>';
+                    pastSummariesContainer.appendChild(detailElement);
+                });
+            }
+
+            // --- Google Drive Functions ---
+            function handleAuthClick() {
+                if (API_KEY === "DEIN_API_KEY" || CLIENT_ID === "DEINE_CLIENT_ID.apps.googleusercontent.com") {
+                    showMessage("Bitte zuerst API Key und Client ID im HTML-Code eintragen.", true);
+                    return;
+                }
+
+                tokenClient.callback = function(resp) {
+                    if (resp.error !== undefined) {
+                        throw (resp);
+                    }
+                    updateSigninStatus(true);
+                };
+
+                if (gapi.client.getToken() === null) {
+                    tokenClient.requestAccessToken({prompt: 'consent'});
+                } else {
+                    tokenClient.requestAccessToken({prompt: ''});
+                }
+            }
+
+            function handleSignoutClick() {
+                var token = gapi.client.getToken();
+                if (token !== null) {
+                    google.accounts.oauth2.revoke(token.access_token);
+                    gapi.client.setToken('');
+                    updateSigninStatus(false);
+                }
+            }
+            
+            function updateSigninStatus(isSignedIn) {
+                if (isSignedIn) {
+                    driveAuthContainer.classList.add('hidden');
+                    driveActionContainer.classList.remove('hidden');
+                    driveStatus.textContent = 'Verbunden mit Google Drive.';
+                } else {
+                    driveAuthContainer.classList.remove('hidden');
+                    driveActionContainer.classList.add('hidden');
+                    driveStatus.textContent = 'Verbinde dein Google-Konto, um Daten zu laden und zu sichern.';
+                }
+            }
+
+            function findOrCreateFile() {
+                return gapi.client.drive.files.list({
+                    'q': "name='" + DATA_FILE_NAME + "' and mimeType='application/json' and trashed=false",
+                    'spaces': 'drive',
+                    'fields': 'files(id, name)'
+                }).then(function(response) {
+                    var files = response.result.files;
+                    if (files && files.length > 0) {
+                        driveFileId = files[0].id;
+                        return files[0].id;
+                    } else {
+                        return gapi.client.drive.files.create({
+                            resource: {
+                                'name': DATA_FILE_NAME,
+                                'mimeType': 'application/json'
+                            },
+                            fields: 'id'
+                        }).then(function(response) {
+                            driveFileId = response.result.id;
+                            return response.result.id;
+                        });
+                    }
+                });
+            }
+
+            function handleLoadFromDrive() {
+                if (!confirm("Möchtest du deine aktuellen lokalen Daten wirklich mit den Daten aus Google Drive überschreiben?")) {
+                    return;
+                }
+                showMessage("Lade Daten aus Drive...");
+                findOrCreateFile().then(function(fileId) {
+                    return gapi.client.drive.files.get({
+                        'fileId': fileId,
+                        'alt': 'media'
+                    });
+                }).then(function(response) {
+                    var data = response.body;
+                    if (data && data.length > 0) {
+                         loadData(JSON.parse(data));
+                    }
+                    saveData();
+                    renderCurrentView();
+                    renderIcalList();
+                    fetchAllIcalEvents();
+                    showMessage("Daten erfolgreich aus Google Drive geladen!", false);
+                }).catch(function(err) {
+                    console.error("Error loading file from drive", err);
+                    if (err.result && err.result.error && err.result.error.message === "File not found") {
+                        showMessage("Noch keine Speicherdatei in Drive gefunden. Speichere zuerst.", false);
+                    } else {
+                        showMessage("Fehler beim Laden aus Drive.", true);
+                    }
+                });
+            }
+
+            function handleSaveToDrive() {
+                 showMessage("Speichere Daten in Drive...");
+                 var content = JSON.stringify(appData);
+                 var boundary = '-------314159265358979323846';
+                 var delimiter = "\r\n--" + boundary + "\r\n";
+                 var close_delim = "\r\n--" + boundary + "--";
+
+                 var metadata = {
+                    'name': DATA_FILE_NAME,
+                    'mimeType': 'application/json'
+                 };
+
+                 var multipartRequestBody =
+                    delimiter +
+                    'Content-Type: application/json\r\n\r\n' +
+                    JSON.stringify(metadata) +
+                    delimiter +
+                    'Content-Type: application/json\r\n\r\n' +
+                    content +
+                    close_delim;
+
+                findOrCreateFile().then(function(fileId) {
+                     return gapi.client.request({
+                        'path': '/upload/drive/v3/files/' + fileId,
+                        'method': 'PATCH',
+                        'params': {'uploadType': 'multipart'},
+                        'headers': {
+                          'Content-Type': 'multipart/related; boundary="' + boundary + '"'
+                        },
+                        'body': multipartRequestBody
+                    });
+                }).then(function(response) {
+                    showMessage("Daten erfolgreich in Google Drive gespeichert!", false);
+                }).catch(function(err) {
+                    console.error("Error saving to drive", err);
+                    showMessage("Fehler beim Speichern in Drive.", true);
+                });
+            }
+
+
+            function setupEventListeners() {
+                weekViewBtn.addEventListener('click', function() { switchView('week'); });
+                monthViewBtn.addEventListener('click', function() { switchView('month'); });
+                prevMonthBtn.addEventListener('click', function() {
+                    displayedDate.setMonth(displayedDate.getMonth() - 1);
+                    renderMonthView();
+                });
+                nextMonthBtn.addEventListener('click', function() {
+                    displayedDate.setMonth(displayedDate.getMonth() + 1);
+                    renderMonthView();
+                });
+                addIcalBtn.addEventListener('click', function() {
+                    var url = icalUrlInput.value.trim();
+                    if (!url) return showMessage("Bitte geben Sie eine URL ein.", true);
+                    if (url.indexOf('http') !== 0 || url.indexOf('.') === -1) {
+                         return showMessage("Dies ist keine gültige URL.", true);
+                    }
+                    if (appData.icalSubscriptions.some(function(sub) { return sub.url === url; })) {
+                        return showMessage("Dieser Kalender wurde bereits abonniert.", true);
+                    }
+                    appData.icalSubscriptions.push({ id: generateUUID(), url: url });
+                    saveData();
+                    renderIcalList();
+                    fetchAllIcalEvents();
+                    showMessage("Kalender wird abonniert...");
+                    icalUrlInput.value = '';
+                });
+                addLectureBtn.addEventListener('click', function() { openModal(); });
+                closeModalBtn.addEventListener('click', closeModal);
+                lectureModal.addEventListener('click', function(e) { if (e.target === lectureModal) closeModal(); });
+                prepareTodayBtn.addEventListener('click', handlePreparationClick);
+                closePrepModalBtn.addEventListener('click', function() { preparationModal.classList.add('hidden'); });
+                preparationModal.addEventListener('click', function(e) { if (e.target === preparationModal) preparationModal.classList.add('hidden'); });
+                
+                examPrepBtn.addEventListener('click', handleExamPrepClick);
+                closeExamPrepModalBtn.addEventListener('click', function() { examPrepModal.classList.add('hidden'); });
+                examPrepModal.addEventListener('click', function(e) { if (e.target === examPrepModal) examPrepModal.classList.add('hidden'); });
+
+                closeDetailModalBtn.addEventListener('click', closeDetailModal);
+                lectureDetailModal.addEventListener('click', function(e) { if (e.target === lectureDetailModal) closeDetailModal(); });
+                editLectureBtn.addEventListener('click', function() {
+                    closeDetailModal();
+                    openModal(currentLecture);
+                });
+                startRecordingBtn.addEventListener('click', handleStartRecording);
+                stopRecordingBtn.addEventListener('click', handleStopRecording);
+                
+                lectureForm.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    var lectureData = { 
+                        courseName: document.getElementById('courseName').value, 
+                        lecturer: document.getElementById('lecturer').value, 
+                        room: document.getElementById('room').value, 
+                        dayOfWeek: document.getElementById('dayOfWeek').value, 
+                        startTime: document.getElementById('startTime').value, 
+                        endTime: document.getElementById('endTime').value 
+                    };
+                    var id = document.getElementById('lectureId').value;
+                    
+                    if (id) { // Editing
+                        var index = -1;
+                        for(var i=0; i < appData.lectures.length; i++) {
+                            if(appData.lectures[i].id === id) {
+                                index = i;
+                                break;
+                            }
+                        }
+                        if (index !== -1) {
+                            appData.lectures[index] = Object.assign({}, appData.lectures[index], lectureData);
+                            showMessage("Vorlesung aktualisiert!");
+                        }
+                    } else { // Adding new
+                        lectureData.id = generateUUID();
+                        appData.lectures.push(lectureData);
+                        showMessage("Vorlesung hinzugefügt!");
+                    }
+                    saveData();
+                    renderCurrentView();
+                    closeModal();
+                });
+                deleteLectureBtn.addEventListener('click', function() {
+                    var id = document.getElementById('lectureId').value;
+                    if(id) {
+                        appData.lectures = appData.lectures.filter(function(l) { return l.id !== id; });
+                        delete appData.summaries[id];
+                        saveData();
+                        renderCurrentView();
+                        showMessage("Vorlesung gelöscht!");
+                        closeModal();
+                    }
+                });
+                
+                driveAuthBtn.addEventListener('click', handleAuthClick);
+                driveSignoutBtn.addEventListener('click', handleSignoutClick);
+                driveLoadBtn.addEventListener('click', handleLoadFromDrive);
+                driveSaveBtn.addEventListener('click', handleSaveToDrive);
+            }
+
+            function showMessage(message, isError) {
+                messageText.textContent = message;
+                messageBox.className = 'fixed top-5 right-5 text-white py-2 px-4 rounded-lg shadow-lg z-[100]';
+                messageBox.classList.add(isError ? 'bg-red-500' : 'bg-green-500');
+                messageBox.classList.remove('hidden');
+                setTimeout(function() { messageBox.classList.add('hidden'); }, 3000);
+            }
+            
+            // Re-inserting all the UI functions that were omitted for brevity
+            function renderTimetable(){var e,t,n,a,o,r,l,d,s;for(timetable.innerHTML="",e=["","Montag","Dienstag","Mittwoch","Donnerstag","Freitag"],e.forEach(function(e,t){var n=document.createElement("div");n.className="day-header p-2 text-center font-semibold bg-white border-b-2 border-gray-200 "+(e?"":"sticky left-0"),t>0&&(n.style.gridColumn=t+1),n.textContent=e,timetable.appendChild(n)}),t=0;t<56;t++)for(n=0;n<5;n++)(a=document.createElement("div")).className="border border-gray-100",a.style.gridRow=t+2,a.style.gridColumn=n+2,t%4==0&&a.classList.add("border-t-gray-200"),timetable.appendChild(a);for(o=7;o<=20;o++)(r=document.createElement("div")).className="time-header text-xs text-right pr-2 pt-0.5 text-gray-400 bg-white border-r-2 border-gray-200 sticky",l=(o-7)*4+2,r.style.gridRow=l+" / span 4",r.textContent=o+":00",timetable.appendChild(r);appData.lectures.forEach(function(e){timetable.appendChild(createLectureElement(e))}),highlightCurrentLecture()}
+            function getCourseColor(e){return courseColorMap[e]||(courseColorMap[e]=colors[colorIndex%colors.length],colorIndex++),courseColorMap[e]}
+            function highlightCurrentLecture(){document.querySelectorAll(".lecture-item").forEach(function(e){e.classList.remove("ring-2","ring-blue-500","z-30")});var e=new Date,t=e.getDay(),n=('0'+e.getHours()).slice(-2)+":"+('0'+e.getMinutes()).slice(-2),a=appData.lectures.find(function(e){return parseInt(e.dayOfWeek)===t&&e.startTime<=n&&e.endTime>n});if(a){var o=document.querySelector('.lecture-item[data-id="'+a.id+'"]');o&&o.classList.add("ring-2","ring-blue-500","z-30")}}
+            function openModal(e){(e=e||null),lectureForm.reset(),e?(modalTitle.textContent="Vorlesung bearbeiten",document.getElementById("lectureId").value=e.id,document.getElementById("courseName").value=e.courseName,document.getElementById("lecturer").value=e.lecturer,document.getElementById("room").value=e.room,document.getElementById("dayOfWeek").value=e.dayOfWeek,document.getElementById("startTime").value=e.startTime,document.getElementById("endTime").value=e.endTime,deleteLectureBtn.classList.remove("hidden")):(modalTitle.textContent="Neue Vorlesung hinzufügen",document.getElementById("lectureId").value="",deleteLectureBtn.classList.add("hidden")),lectureModal.classList.remove("hidden")}
+            function closeModal(){lectureModal.classList.add("hidden")}
+            function openDetailModal(e){currentLecture=e,detailModalTitle.textContent=e.courseName,detailModalSubtitle.textContent=(e.lecturer||"")+" | Raum: "+(e.room||""),lectureDetailModal.classList.remove("hidden"),recordingStatus.textContent="Startklar. Klicken Sie auf den Button, um die Aufnahme zu beginnen.",resetRecordingUI(),loadPastSummaries(e.id)}
+            function closeDetailModal(){isRecording&&recognition&&(isRecording=!1,recognition.stop()),lectureDetailModal.classList.add("hidden"),currentLecture=null}
+            function parseGeminiResponse(e){return e.replace(/\*\*(.*?)\*\*/g,'<strong class="text-gray-900">$1</strong>').replace(/\*(.*?)\*/g,"<em>$1</em>").replace(/^- (.*$)/gm,'<li class="list-disc ml-6">$1</li>').replace(/\n/g,"<br>")}
+            function callGeminiAPI(e){var t="",n="https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key="+t,a={contents:[{parts:[{text:e}]}]};return fetch(n,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(a)}).then(function(e){if(!e.ok)throw new Error("API request failed with status "+e.status);return e.json()}).then(function(e){if(e.candidates&&e.candidates[0]&&e.candidates[0].content&&e.candidates[0].content.parts[0]&&e.candidates[0].content.parts[0].text)return e.candidates[0].content.parts[0].text;throw new Error("Invalid response structure from API")})}
+            function handlePreparationClick(){var e=new Date,t=appData.lectures.filter(function(t){return parseInt(t.dayOfWeek)===e.getDay()}).sort(function(e,t){return e.startTime.localeCompare(t.startTime)});preparationModal.classList.remove("hidden"),prepLoader.style.display="flex",preparationContent.innerHTML="",preparationContent.appendChild(prepLoader);var n=t.map(function(e){return e.courseName}).join(", ");if(0===t.length)return void(preparationContent.innerHTML='<p class="text-center text-gray-600 py-10">Für heute sind keine Vorlesungen geplant. Genieße den freien Tag!</p>');var a="Du bist ein hilfreicher Studienassistent. Erstelle einen Vorbereitungsplan für einen Universitätsstudenten für die folgenden Kurse, die heute anstehen: "+n+". Gib für jeden Kurs: 1. **Wahrscheinliches Kernthema**, 2. **Frage zum Nachdenken** und 3. **Wichtige Schlüsselbegriffe** (2-3). Formatiere die Antwort klar mit Markdown.";callGeminiAPI(a).then(function(e){preparationContent.innerHTML='<div class="prose max-w-none">'+parseGeminiResponse(e)+"</div>"}).catch(function(e){console.error("Failed to get preparation plan:",e),preparationContent.innerHTML='<p class="text-center text-red-600 py-10">Leider konnte der Vorbereitungsplan nicht erstellt werden.</p>'})}
+            function handleExamPrepClick(){examPrepModal.classList.remove("hidden"),examPrepContent.innerHTML="";var e=appData.lectures.map(function(e){return e.courseName}).filter(function(e,t,n){return n.indexOf(e)===t});if(0===e.length)return void(examPrepContent.innerHTML='<p class="text-center text-gray-600 py-10">Füge zuerst Vorlesungen hinzu, um die Klausurvorbereitung zu nutzen.</p>');var t='<h3 class="text-lg font-semibold mb-4">Für welchen Kurs möchtest du dich vorbereiten?</h3><div class="flex flex-wrap gap-2">';e.forEach(function(e){t+='<button class="exam-prep-course-btn bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-2 px-4 rounded-lg transition-colors" data-course-name="'+e+'">'+e+"</button>"}),t+="</div>",examPrepContent.innerHTML=t,document.querySelectorAll(".exam-prep-course-btn").forEach(function(e){e.addEventListener("click",generateExamPrepForCourse)})}
+            function generateExamPrepForCourse(e){var t=e.target.dataset.courseName;examPrepContent.innerHTML='<div class="flex justify-center items-center py-16"><div class="loader"></div></div>';var n=appData.lectures.filter(function(e){return e.courseName===t}),a=[];if(n.forEach(function(e){if(appData.summaries[e.id]){var t=appData.summaries[e.id].map(function(e){return e.summary});a=a.concat(t)}}),0===a.length)return void(examPrepContent.innerHTML='<div class="text-center py-10"><p class="text-gray-600">Für den Kurs "'+t+'" wurden noch keine Zusammenfassungen gefunden.</p><p class="text-sm text-gray-500 mt-2">Nutze die "Aufnahme & Zusammenfassung"-Funktion in den Vorlesungsdetails, um Inhalte zu sammeln.</p></div>');var o=a.join("\n\n---\n\n"),r="Du bist ein erfahrener Tutor. Basierend auf den folgenden Zusammenfassungen aus einer Vorlesungsreihe zum Thema '"+t+"', erstelle bitte eine umfassende Klausurvorbereitung auf Deutsch. Diese sollte beinhalten:\n1.  **Zentrale Kernthemen:** Eine Liste der 3-5 wichtigsten übergeordneten Themen, die in den Zusammenfassungen behandelt wurden.\n2.  **Mögliche Klausurfragen:** 3-4 anspruchsvolle, offene Fragen, die das Verständnis der Kernthemen testen.\n3.  **Wichtige Definitionen:** Eine Liste von Schlüsselbegriffen, die man für die Klausur definieren können sollte.\nFormatiere die Antwort klar und strukturiert mit Markdown.\n\nHier sind die gesammelten Zusammenfassungen:\n"+o;callGeminiAPI(r).then(function(e){examPrepContent.innerHTML='<div class="prose max-w-none">'+parseGeminiResponse(e)+"</div>"}).catch(function(e){console.error("Failed to get exam prep:",e),examPrepContent.innerHTML='<p class="text-center text-red-600 py-10">Leider konnte die Klausurvorbereitung nicht erstellt werden.</p>'})}
+            function resetRecordingUI(){stopRecordingBtn.classList.add("hidden"),startRecordingBtn.classList.remove("hidden"),liveTranscript.classList.add("hidden")}
+            function saveSummary(e,t,n){var a=new Date().toISOString().split("T")[0];appData.summaries[e]||(appData.summaries[e]=[]),appData.summaries[e]=appData.summaries[e].filter(function(e){return e.date!==a}),appData.summaries[e].push({date:a,transcript:t,summary:n,createdAt:new Date().toISOString()}),saveData(),showMessage("Zusammenfassung gespeichert!"),loadPastSummaries(e)}
+            function loadPastSummaries(e){pastSummariesContainer.innerHTML="";var t=appData.summaries[e]||[];if(0===t.length)return void(pastSummariesContainer.innerHTML='<p class="text-gray-500">Keine Zusammenfassungen für diese Vorlesung gefunden.</p>');var n=t.sort(function(a,b){return new Date(b.createdAt)-new Date(a.createdAt)});n.forEach(function(e){var t=document.createElement("details");t.className="bg-gray-50 p-3 rounded-lg",t.innerHTML='<summary class="font-semibold cursor-pointer">Zusammenfassung vom '+new Date(e.date).toLocaleDateString("de-DE")+'</summary><div class="prose max-w-none mt-2 pt-2 border-t text-sm">'+parseGeminiResponse(e.summary)+"</div>",pastSummariesContainer.appendChild(t)})}
+
+
+            // --- Start the App ---
+            main();
+        });
+    </script>
+</body>
+</html>
+
